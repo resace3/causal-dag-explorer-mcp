@@ -23,17 +23,25 @@ test.beforeEach(async ({ request }) => {
   await resetStore(request);
 });
 
-async function connect(page: Page, source: Locator, target: Locator, sourceSide = 'right', targetSide = 'left') {
-  const sourceHandle = source.locator(`.react-flow__handle-${sourceSide}`);
-  const targetHandle = target.locator(`.react-flow__handle-${targetSide}`);
-  const start = await sourceHandle.boundingBox();
-  const end = await targetHandle.boundingBox();
-  if (!start || !end) throw new Error('A connection handle was not visible');
-  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
-  await page.mouse.down();
-  await page.mouse.move((start.x + end.x) / 2, (start.y + end.y) / 2, { steps: 8 });
-  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 8 });
-  await page.mouse.up();
+async function connect(page: Page, source: Locator, target: Locator, sourceSide = 'right', targetSide = 'left', expectNewEdge = true) {
+  for (let attempt = 0; attempt < (expectNewEdge ? 2 : 1); attempt += 1) {
+    const edgeCount = await page.locator('.react-flow__edge').count();
+    const sourceHandle = source.locator(`.react-flow__handle-${sourceSide}`);
+    const targetHandle = target.locator(`.react-flow__handle-${targetSide}`);
+    const start = await sourceHandle.boundingBox();
+    const end = await targetHandle.boundingBox();
+    if (!start || !end) throw new Error('A connection handle was not visible');
+    await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(60);
+    await page.mouse.move((start.x + end.x) / 2, (start.y + end.y) / 2, { steps: 12 });
+    await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 12 });
+    await page.waitForTimeout(60);
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    if (!expectNewEdge || await page.locator('.react-flow__edge').count() === edgeCount + 1) return;
+  }
+  throw new Error('The directed edge was not created after two natural pointer drags');
 }
 
 async function renameBox(page: Page, current: string, next: string) {
@@ -118,11 +126,11 @@ test('creates, edits, connects, rejects invalid edges, saves, and reloads a five
   await connect(page, mood, productivity);
   await expect(page.locator('.react-flow__edge')).toHaveCount(5);
 
-  await connect(page, sleep, sleep, 'right', 'left');
+  await connect(page, sleep, sleep, 'right', 'left', false);
   await expect(page.getByRole('alert')).toContainText('cannot connect to itself');
-  await connect(page, sleep, mood);
+  await connect(page, sleep, mood, 'right', 'left', false);
   await expect(page.getByRole('alert')).toContainText('already exists');
-  await connect(page, mood, sleep);
+  await connect(page, mood, sleep, 'right', 'left', false);
   await expect(page.getByRole('alert')).toContainText('directed cycle');
   await expect(page.locator('.react-flow__edge')).toHaveCount(5);
 
