@@ -21,13 +21,14 @@ import { api } from './api';
 import { DayNode, type DayNodeData } from './DayNode';
 import { EvidenceWorkspace, type EvidenceTab } from './EvidencePanels';
 import { GraphLogo, Icon } from './Icons';
+import { NodeLogo } from './NodeLogo';
 
 type FlowNode = Node<DayNodeData, 'dayNode'>;
 type ExplorerView = 'dag' | 'timelines' | 'evidence' | 'data' | 'settings';
 
 const nodeColors: DayNodeData['color'][] = ['green', 'blue', 'orange', 'violet', 'rose', 'slate'];
 const edgeDefaults = {
-  type: 'smoothstep',
+  type: 'bezier',
   interactionWidth: 24,
   markerEnd: { type: MarkerType.ArrowClosed, color: '#7c8aa5', width: 18, height: 18 },
   style: { stroke: '#aab4c7', strokeWidth: 1.8 }
@@ -448,7 +449,7 @@ function SelectionInspector({ day, edge, node, relationship, onClose, onRational
   if (node) {
     return <aside className="inspector-card" aria-label="Selected box details">
       <div className="inspector-title"><div><small>Selected box</small><h3>{node.data.label}</h3></div><button aria-label="Close inspector" onClick={onClose}><Icon name="close" size={17} /></button></div>
-      <div className="node-detail-icon color-blue">{node.data.icon ?? node.data.label.slice(0, 1).toUpperCase()}</div>
+      <NodeLogo className="node-detail-icon" label={node.data.label} icon={node.data.icon} />
       <dl className="detail-list"><div><dt>Position</dt><dd>{Math.round(node.position.x)}, {Math.round(node.position.y)}</dd></div><div><dt>Source entity</dt><dd>{node.data.sourceEntityId ?? 'Manual box'}</dd></div></dl>
       <div className="inspector-note"><Icon name="info" size={18} /><p>{node.data.observedSummary ?? 'No observed summary has been supplied for this box.'}</p></div>
       <button className="inspector-action" onClick={() => node.data.onRename?.(node.id, node.data.label)}><Icon name="edit" size={15} /> Rename box</button>

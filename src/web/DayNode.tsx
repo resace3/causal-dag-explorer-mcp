@@ -1,4 +1,5 @@
 import { Handle, Position, type NodeProps } from 'reactflow';
+import { NodeLogo } from './NodeLogo';
 
 export interface DayNodeData {
   label: string;
@@ -20,7 +21,7 @@ export function DayNode({ id, data, selected }: NodeProps<DayNodeData>) {
     <button className="node-rename nodrag nopan" type="button" aria-label={`Rename ${data.label}`} title="Rename box" onClick={rename}>✎</button>
     <Handle type="source" position={Position.Left} id="left" className="connection-handle handle-left" aria-label={`Connect from ${data.label} left`} />
     <Handle type="source" position={Position.Top} id="top" className="connection-handle handle-top" aria-label={`Connect from ${data.label} top`} />
-    <span className="node-icon" aria-hidden="true">{data.icon ?? data.label.slice(0, 1).toUpperCase()}</span>
+    <NodeLogo label={data.label} icon={data.icon} />
     <span className="node-label">{data.label}</span>
     {data.sourceEntityId && <span className="ha-node-badge" aria-label={`Home Assistant source ${data.sourceEntityId}`}>HA</span>}
     <Handle type="source" position={Position.Right} id="right" className="connection-handle handle-right" aria-label={`Connect from ${data.label} right`} />

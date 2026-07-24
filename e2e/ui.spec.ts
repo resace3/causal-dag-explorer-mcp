@@ -74,6 +74,13 @@ test('synthetic explorer renders every evidence and navigation view', async ({ p
   await expect(page.getByRole('heading', { name: 'Causal DAG Explorer ✦' })).toBeVisible();
   await expect(page.locator('.react-flow__node')).toHaveCount(5);
   await expect(page.locator('.react-flow__edge')).toHaveCount(5);
+  await expect(page.locator('.node-logo')).toHaveCount(5);
+  for (const kind of ['activity', 'sleep', 'stress', 'mood', 'productivity']) {
+    await expect(page.locator(`.node-logo[data-icon-kind="${kind}"]`)).toHaveCount(1);
+  }
+  expect(await page.locator('.react-flow__edge-path').evaluateAll((paths) =>
+    paths.every((path) => path.getAttribute('d')?.includes('C'))
+  )).toBe(true);
   await expect(page.getByRole('heading', { name: 'Sleep → Mood' })).toBeVisible();
   await expect(page.getByRole('listitem')).toHaveCount(30);
   await expect(page.getByText('20 of 30 supportive', { exact: true })).toBeVisible();
@@ -104,6 +111,9 @@ test('creates, edits, connects, rejects invalid edges, saves, and reloads a five
     await renameBox(page, `Box ${index + 1}`, label);
   }
   await expect(page.locator('.react-flow__node')).toHaveCount(5);
+  for (const kind of ['activity', 'sleep', 'stress', 'mood', 'productivity']) {
+    await expect(page.locator(`.node-logo[data-icon-kind="${kind}"]`)).toHaveCount(1);
+  }
 
   const node = (label: string) => page.locator('.day-node').filter({ hasText: label });
   const exercise = node('Exercise');
@@ -125,6 +135,9 @@ test('creates, edits, connects, rejects invalid edges, saves, and reloads a five
   await connect(page, stress, mood);
   await connect(page, mood, productivity);
   await expect(page.locator('.react-flow__edge')).toHaveCount(5);
+  expect(await page.locator('.react-flow__edge-path').evaluateAll((paths) =>
+    paths.every((path) => path.getAttribute('d')?.includes('C'))
+  )).toBe(true);
 
   await connect(page, sleep, sleep, 'right', 'left', false);
   await expect(page.getByRole('alert')).toContainText('cannot connect to itself');

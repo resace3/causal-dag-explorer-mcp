@@ -7,11 +7,11 @@
       "createdAt": "2026-01-01T12:00:00.000Z",
       "updatedAt": "2026-01-30T12:00:00.000Z",
       "nodes": [
-        { "id": "exercise", "label": "Exercise", "x": 410, "y": 45, "color": "violet", "icon": "E", "observedSummary": "Synthetic daily activity score used only to demonstrate the interface." },
-        { "id": "sleep", "label": "Sleep", "x": 120, "y": 190, "color": "green", "icon": "S", "observedSummary": "Synthetic hours slept; no real person or device is represented." },
-        { "id": "stress", "label": "Stress", "x": 420, "y": 300, "color": "rose", "icon": "T", "observedSummary": "Synthetic self-rating used only for the example." },
-        { "id": "mood", "label": "Mood", "x": 650, "y": 175, "color": "blue", "icon": "M", "observedSummary": "Synthetic mood score used only for the example." },
-        { "id": "productivity", "label": "Productivity", "x": 890, "y": 175, "color": "orange", "icon": "P", "observedSummary": "Synthetic productivity score used only for the example." }
+        { "id": "exercise", "label": "Exercise", "x": 410, "y": 45, "color": "violet", "icon": "exercise", "observedSummary": "Synthetic daily activity score used only to demonstrate the interface." },
+        { "id": "sleep", "label": "Sleep", "x": 120, "y": 190, "color": "green", "icon": "sleep", "observedSummary": "Synthetic hours slept; no real person or device is represented." },
+        { "id": "stress", "label": "Stress", "x": 420, "y": 300, "color": "rose", "icon": "stress", "observedSummary": "Synthetic self-rating used only for the example." },
+        { "id": "mood", "label": "Mood", "x": 650, "y": 175, "color": "blue", "icon": "mood", "observedSummary": "Synthetic mood score used only for the example." },
+        { "id": "productivity", "label": "Productivity", "x": 890, "y": 175, "color": "orange", "icon": "work", "observedSummary": "Synthetic productivity score used only for the example." }
       ],
       "edges": [
         { "id": "edge-exercise-sleep", "source": "exercise", "target": "sleep", "sourceHandle": "left", "targetHandle": "top", "rationale": "Hypothesis to inspect: exercise may support sleep." },
