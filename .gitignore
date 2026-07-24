@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+data/*.tmp
+data/days.json
+.env
+.env.*
+!.env.example
+.tmp/
+playwright-report/
+test-results/
+coverage/

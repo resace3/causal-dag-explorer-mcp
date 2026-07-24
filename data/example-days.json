@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "days": [
+    {
+      "id": "day-synthetic-wellbeing",
+      "name": "Wellbeing example",
+      "createdAt": "2026-01-01T12:00:00.000Z",
+      "updatedAt": "2026-01-30T12:00:00.000Z",
+      "nodes": [
+        { "id": "exercise", "label": "Exercise", "x": 410, "y": 45, "color": "violet", "icon": "E", "observedSummary": "Synthetic daily activity score used only to demonstrate the interface." },
+        { "id": "sleep", "label": "Sleep", "x": 120, "y": 190, "color": "green", "icon": "S", "observedSummary": "Synthetic hours slept; no real person or device is represented." },
+        { "id": "stress", "label": "Stress", "x": 420, "y": 300, "color": "rose", "icon": "T", "observedSummary": "Synthetic self-rating used only for the example." },
+        { "id": "mood", "label": "Mood", "x": 650, "y": 175, "color": "blue", "icon": "M", "observedSummary": "Synthetic mood score used only for the example." },
+        { "id": "productivity", "label": "Productivity", "x": 890, "y": 175, "color": "orange", "icon": "P", "observedSummary": "Synthetic productivity score used only for the example." }
+      ],
+      "edges": [
+        { "id": "edge-exercise-sleep", "source": "exercise", "target": "sleep", "sourceHandle": "left", "targetHandle": "top", "rationale": "Hypothesis to inspect: exercise may support sleep." },
+        { "id": "edge-exercise-mood", "source": "exercise", "target": "mood", "sourceHandle": "right", "targetHandle": "top", "rationale": "Hypothesis to inspect: exercise may affect mood." },
+        { "id": "edge-sleep-mood", "source": "sleep", "target": "mood", "sourceHandle": "right", "targetHandle": "left", "rationale": "Hypothesis to inspect: sleep may affect next-day mood." },
+        { "id": "edge-stress-mood", "source": "stress", "target": "mood", "sourceHandle": "right", "targetHandle": "bottom", "rationale": "Hypothesis to inspect: stress may affect mood." },
+        { "id": "edge-mood-productivity", "source": "mood", "target": "productivity", "sourceHandle": "right", "targetHandle": "left", "rationale": "Hypothesis to inspect: mood may affect productivity." }
+      ],
+      "evidence": {
+        "provider": "synthetic_example",
+        "question": "How could sleep relate to next-day mood in a fictional example?",
+        "generatedAt": "2026-01-30T12:00:00.000Z",
+        "entityIds": [],
+        "windowLabel": "Jan 1 – Jan 30, 2026 · synthetic",
+        "notes": [
+          "All values in this file are synthetic and exist only to demonstrate the interface.",
+          "Support classifications and labels are supplied example metadata, not generated causal conclusions.",
+          "An arrow is a hypothesis for exploration, not proof that its source causes its target."
+        ],
+        "relationships": [
+          {
+            "edgeId": "edge-sleep-mood",
+            "summary": "In this synthetic example, lower sleep is often followed by a lower next-day mood score.",
+            "supportCount": 20,
+            "totalCount": 30,
+            "averageLag": "About 24 hours",
+            "strengthLabel": "Exploratory",
+            "consistencyLabel": "20 of 30 fictional days",
+            "interpretation": "The supplied pattern is worth inspecting; it does not establish a causal effect.",
+            "sourceUnit": "hours",
+            "targetUnit": "score",
+            "daily": [
+              { "label": "Jan 1", "sourceValue": 6.2, "targetValue": 6.0, "support": "supportive" },
+              { "label": "Jan 2", "sourceValue": 5.4, "targetValue": 5.1, "support": "supportive" },
+              { "label": "Jan 3", "sourceValue": 6.8, "targetValue": 6.4, "support": "supportive" },
+              { "label": "Jan 4", "sourceValue": 7.4, "targetValue": 7.0, "support": "supportive" },
+              { "label": "Jan 5", "sourceValue": 7.8, "targetValue": 7.2, "support": "supportive" },
+              { "label": "Jan 6", "sourceValue": 6.7, "targetValue": 5.8, "support": "mixed" },
+              { "label": "Jan 7", "sourceValue": 6.9, "targetValue": 6.0, "support": "not_supportive" },
+              { "label": "Jan 8", "sourceValue": 5.2, "targetValue": 6.1, "support": "mixed" },
+              { "label": "Jan 9", "sourceValue": 6.5, "targetValue": 6.3, "support": "supportive" },
+              { "label": "Jan 10", "sourceValue": 5.8, "targetValue": 5.4, "support": "supportive" },
+              { "label": "Jan 11", "sourceValue": 7.2, "targetValue": 6.9, "support": "supportive" },
+              { "label": "Jan 12", "sourceValue": 6.0, "targetValue": 5.7, "support": "supportive" },
+              { "label": "Jan 13", "sourceValue": 5.7, "targetValue": 5.3, "support": "supportive" },
+              { "label": "Jan 14", "sourceValue": 4.4, "targetValue": 4.6, "support": "mixed" },
+              { "label": "Jan 15", "sourceValue": 6.1, "targetValue": 6.0, "support": "supportive" },
+              { "label": "Jan 16", "sourceValue": 6.6, "targetValue": 6.2, "support": "supportive" },
+              { "label": "Jan 17", "sourceValue": 7.1, "targetValue": 7.0, "support": "supportive" },
+              { "label": "Jan 18", "sourceValue": 6.0, "targetValue": 5.6, "support": "supportive" },
+              { "label": "Jan 19", "sourceValue": 7.5, "targetValue": 6.8, "support": "supportive" },
+              { "label": "Jan 20", "sourceValue": 5.3, "targetValue": 5.0, "support": "supportive" },
+              { "label": "Jan 21", "sourceValue": 6.7, "targetValue": 6.3, "support": "supportive" },
+              { "label": "Jan 22", "sourceValue": 5.6, "targetValue": 6.2, "support": "not_supportive" },
+              { "label": "Jan 23", "sourceValue": 6.4, "targetValue": 5.7, "support": "not_supportive" },
+              { "label": "Jan 24", "sourceValue": 5.4, "targetValue": 5.2, "support": "supportive" },
+              { "label": "Jan 25", "sourceValue": 6.3, "targetValue": 6.0, "support": "supportive" },
+              { "label": "Jan 26", "sourceValue": 6.1, "targetValue": 6.5, "support": "mixed" },
+              { "label": "Jan 27", "sourceValue": 6.2, "targetValue": 6.0, "support": "supportive" },
+              { "label": "Jan 28", "sourceValue": 5.0, "targetValue": 6.2, "support": "not_supportive" },
+              { "label": "Jan 29", "sourceValue": 6.4, "targetValue": 5.4, "support": "not_supportive" },
+              { "label": "Jan 30", "sourceValue": 6.2, "targetValue": 6.0, "support": "mixed" }
+            ],
+            "hourly": [
+              { "label": "12 AM", "sourceValue": 0.9, "targetValue": 2.0 },
+              { "label": "2 AM", "sourceValue": 0.9, "targetValue": 2.4 },
+              { "label": "4 AM", "sourceValue": 0.9, "targetValue": 3.1 },
+              { "label": "6 AM", "sourceValue": 0.8, "targetValue": 3.8 },
+              { "label": "8 AM", "sourceValue": 0.1, "targetValue": 4.1 },
+              { "label": "10 AM", "sourceValue": 0.1, "targetValue": 4.5 },
+              { "label": "12 PM", "sourceValue": 0.1, "targetValue": 4.3 },
+              { "label": "2 PM", "sourceValue": 0.1, "targetValue": 2.5 },
+              { "label": "4 PM", "sourceValue": 0.1, "targetValue": 2.2 },
+              { "label": "6 PM", "sourceValue": 0.1, "targetValue": 3.4 },
+              { "label": "8 PM", "sourceValue": 0.2, "targetValue": 5.0 },
+              { "label": "10 PM", "sourceValue": 0.5, "targetValue": 6.1 },
+              { "label": "12 AM", "sourceValue": 0.9, "targetValue": 7.0 }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
