@@ -85,6 +85,17 @@ test('synthetic explorer renders every evidence and navigation view', async ({ p
   await expect(page.getByRole('listitem')).toHaveCount(30);
   await expect(page.getByText('20 of 30 supportive', { exact: true })).toBeVisible();
 
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export JSON', exact: true }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('wellbeing-example.json');
+  const downloadPath = await download.path();
+  expect(downloadPath).toBeTruthy();
+  const exported = JSON.parse(await readFile(downloadPath!, 'utf8'));
+  expect(exported.name).toBe('Wellbeing example');
+  expect(exported.nodes).toHaveLength(5);
+  expect(exported.edges).toHaveLength(5);
+
   await page.getByRole('tab', { name: 'Timelines', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Aligned evidence timeline' })).toBeVisible();
   await page.getByRole('tab', { name: 'Descriptive stats', exact: true }).click();
@@ -96,6 +107,22 @@ test('synthetic explorer renders every evidence and navigation view', async ({ p
   await expect(page.getByRole('heading', { name: 'Diagram data' })).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByText('DAG safeguards', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'DAG View', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'DAG diagram card' })).toBeVisible();
+});
+
+test('keeps collapsed sidebar navigation named and functional', async ({ page }) => {
+  await page.setViewportSize({ width: 820, height: 900 });
+  await page.goto('/');
+
+  for (const label of ['DAG View', 'Timelines', 'Evidence', 'Data', 'Settings']) {
+    await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+
+  await page.getByRole('button', { name: 'Timelines', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Aligned evidence timeline' })).toBeVisible();
+  await page.getByRole('button', { name: 'Evidence', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Evidence strip' })).toBeVisible();
   await page.getByRole('button', { name: 'DAG View', exact: true }).click();
   await expect(page.getByRole('region', { name: 'DAG diagram card' })).toBeVisible();
 });

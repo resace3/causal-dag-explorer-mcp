@@ -435,7 +435,7 @@ export function App() {
 }
 
 function NavButton({ icon, label, active, onClick }: { icon: 'graph' | 'timeline' | 'evidence' | 'data' | 'settings'; label: string; active: boolean; onClick: () => void }) {
-  return <button className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={onClick}><Icon name={icon} size={20} /><span>{label}</span></button>;
+  return <button className={active ? 'active' : ''} aria-label={label} title={label} aria-current={active ? 'page' : undefined} onClick={onClick}><Icon name={icon} size={20} /><span>{label}</span></button>;
 }
 
 function SelectionInspector({ day, edge, node, relationship, onClose, onRationaleChange }: {
