@@ -8,8 +8,16 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, Query, status
 
 from ..causal.dag import build_dag, observed_variables
+from ..causal.edits import (
+    CausalEditError,
+    describe,
+    effective_edges,
+    suppressed_edges,
+    user_strength,
+    validate_addition,
+)
 from ..causal.grounding import ground
-from ..causal.knowledge import VARIABLES
+from ..causal.knowledge import EDGES as KNOWLEDGE_EDGES, VARIABLES
 from ..config.loader import get_config, resolve_timezone
 from ..config.settings import get_settings
 from ..connectors.wearables.registry import available_providers
@@ -228,8 +236,9 @@ async def causal_dag(
     timeline = sync.repository.get_timeline(target)
     available = {lane.id for lane in timeline.lanes if lane.available} if timeline else set()
 
+    edges = effective_edges(sync.repository.get_edge_overrides())
     try:
-        dag = build_dag(outcome, exposure or None, observed_variables(available))
+        dag = build_dag(outcome, exposure or None, observed_variables(available), edges=edges)
     except ValueError as exc:
         raise ApiError(
             "invalid_causal_question",
@@ -242,6 +251,92 @@ async def causal_dag(
     placed = ground(dag, timeline).to_dict() if timeline is not None else None
 
     return {"date": target.isoformat(), **dag.to_dict(), "timeline": placed}
+
+
+@router.get("/dag/edges", summary="Every causal edge in the model, with its origin")
+async def list_causal_edges(repository: RepositoryDep) -> dict[str, Any]:
+    overrides = repository.get_edge_overrides()
+    edges = effective_edges(overrides)
+    return {
+        "edges": describe(edges),
+        "suppressed": [item.to_dict() for item in suppressed_edges(overrides)],
+        "note": (
+            "Edges marked 'knowledge_base' come from published physiology. Edges "
+            "marked 'user' were added here. Both are hypotheses; neither is an "
+            "estimate from your data."
+        ),
+    }
+
+
+@router.post("/dag/edges", summary="Add a causal edge to the model")
+async def add_causal_edge(
+    repository: RepositoryDep,
+    source: Annotated[str, Body(embed=True)],
+    target: Annotated[str, Body(embed=True)],
+    rationale: Annotated[str | None, Body(embed=True)] = None,
+    strength: Annotated[str | None, Body(embed=True)] = None,
+) -> dict[str, Any]:
+    overrides = repository.get_edge_overrides()
+    edges = effective_edges(overrides)
+    try:
+        normalized = user_strength(strength)
+        validate_addition(source, target, edges)
+    except CausalEditError as exc:
+        raise ApiError(
+            "invalid_causal_edge",
+            str(exc),
+            hint="Call GET /api/dag/variables for the list of known variables.",
+        ) from None
+
+    repository.set_edge_override(
+        source=source,
+        target=target,
+        action="add",
+        rationale=(rationale or "").strip(),
+        strength=normalized,
+    )
+    return {"added": {"source": source, "target": target}, "estimated": False}
+
+
+@router.delete("/dag/edges/{source}/{target}", summary="Remove a causal edge from the model")
+async def remove_causal_edge(source: str, target: str, repository: RepositoryDep) -> dict[str, Any]:
+    overrides = repository.get_edge_overrides()
+    added_by_user = any(
+        o.source == source and o.target == target and o.action == "add" for o in overrides
+    )
+    in_knowledge_base = any(
+        edge.source == source and edge.target == target for edge in KNOWLEDGE_EDGES
+    )
+
+    if added_by_user:
+        # The user drew it, so removing it just drops their own override.
+        repository.clear_edge_override(source=source, target=target)
+        return {"removed": {"source": source, "target": target}, "restorable": False}
+
+    if not in_knowledge_base:
+        raise ApiError(
+            "unknown_causal_edge",
+            f"There is no edge {source} → {target} to remove.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            hint="Call GET /api/dag/edges for the edges currently in the model.",
+        )
+
+    # A published prior is suppressed rather than deleted, so it can come back.
+    repository.set_edge_override(source=source, target=target, action="remove")
+    return {"removed": {"source": source, "target": target}, "restorable": True}
+
+
+@router.post("/dag/edges/{source}/{target}/restore", summary="Restore a suppressed edge")
+async def restore_causal_edge(
+    source: str, target: str, repository: RepositoryDep
+) -> dict[str, Any]:
+    if not repository.clear_edge_override(source=source, target=target):
+        raise ApiError(
+            "no_such_override",
+            f"No override is stored for {source} → {target}.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    return {"restored": {"source": source, "target": target}}
 
 
 @router.get("/events/{event_id}", summary="Full metadata and provenance for one event")

@@ -198,6 +198,36 @@ export function LayersIcon({ size = 16, className, strokeWidth = 1.6 }: IconProp
   );
 }
 
+export function ChevronUpIcon({ size = 16, className, strokeWidth = 1.9 }: IconProps) {
+  return (
+    <svg {...base(size, className, strokeWidth)}>
+      <path d="M6 14.5l6-6 6 6" />
+    </svg>
+  );
+}
+
+/** The six-dot handle that says "this row can be dragged". */
+export function GripIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      aria-hidden
+      focusable={false}
+    >
+      <circle cx="9" cy="6" r="1.6" />
+      <circle cx="15" cy="6" r="1.6" />
+      <circle cx="9" cy="12" r="1.6" />
+      <circle cx="15" cy="12" r="1.6" />
+      <circle cx="9" cy="18" r="1.6" />
+      <circle cx="15" cy="18" r="1.6" />
+    </svg>
+  );
+}
+
 export function BedIcon({ size = 18, className, strokeWidth }: IconProps) {
   return (
     <svg {...base(size, className, strokeWidth)}>

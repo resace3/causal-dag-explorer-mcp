@@ -26,7 +26,8 @@ import {
   type DagVariable,
 } from '../api/client';
 import { useElementWidth } from '../hooks/useElementWidth';
-import { InfoIcon, VariableIcon } from '../components/Icons';
+import { VariableIcon } from '../components/Icons';
+import { EdgeEditor } from './EdgeEditor';
 import { AxisRow, GridLines } from '../timeline/Axis';
 import { createScale } from '../timeline/scale';
 import { AXIS_HEIGHT, LANE_LABEL_WIDTH } from '../utilities/lanes';
@@ -43,6 +44,7 @@ const LABEL_GAP = 80;
 
 const IMMEDIATE_COLOR = '#1e3a8a';
 const DELAYED_COLOR = '#16a34a';
+const USER_EDGE_COLOR = '#7c3aed';
 
 interface RoleStyle {
   /** Pale wash, for bands and legend swatches. */
@@ -216,6 +218,9 @@ export function DagView({ date }: { date: string | null }) {
   const [busy, setBusy] = useState(false);
   const [hovered, setHovered] = useState<DagLink | null>(null);
   const [selected, setSelected] = useState<DagOccurrence | null>(null);
+  const [editing, setEditing] = useState(false);
+  // Bumped by the editor so an added or removed arrow rebuilds the graph.
+  const [edgeRevision, setEdgeRevision] = useState(0);
   const { ref, width } = useElementWidth<HTMLDivElement>(900);
   const requestId = useRef(0);
 
@@ -247,7 +252,7 @@ export function DagView({ date }: { date: string | null }) {
       .finally(() => {
         if (id === requestId.current) setBusy(false);
       });
-  }, [date, outcome, exposure]);
+  }, [date, outcome, exposure, edgeRevision]);
 
   const placed = dag?.timeline ?? null;
   const plotWidth = Math.max(width, MIN_PLOT_WIDTH);
@@ -330,17 +335,28 @@ export function DagView({ date }: { date: string | null }) {
           testId="dag-exposure"
         />
         {busy ? <span className="text-[11.5px] text-slate-400">Building…</span> : null}
+
+        <button
+          type="button"
+          onClick={() => setEditing((value) => !value)}
+          aria-expanded={editing}
+          data-testid="dag-edit-toggle"
+          className={`ml-auto rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition ${
+            editing
+              ? 'border-slate-300 bg-slate-100 text-slate-800'
+              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-800'
+          }`}
+        >
+          {editing ? 'Done editing' : 'Edit arrows'}
+        </button>
       </div>
 
-      <p className="flex items-start gap-2 border-b border-slate-100 bg-amber-50/40 px-5 py-2.5 text-[12px] leading-relaxed text-amber-900">
-        <InfoIcon size={15} className="mt-0.5 shrink-0" />
-        <span>
-          <strong className="font-semibold">These arrows are assumptions, not findings.</strong>{' '}
-          The nodes are real — each sits at the hour your data recorded it. The arrows between
-          them come from published physiology and have not been estimated or tested against your
-          day.
-        </span>
-      </p>
+      {editing ? (
+        <EdgeEditor
+          variables={variables}
+          onChanged={() => setEdgeRevision((value) => value + 1)}
+        />
+      ) : null}
 
       {error ? (
         <p role="alert" className="px-5 py-6 text-[12.5px] text-rose-700">
@@ -521,6 +537,21 @@ export function DagView({ date }: { date: string | null }) {
           </svg>
           Fainter — weaker evidence for the link
         </span>
+        {placed?.links.some((link) => link.origin === 'user') ? (
+          <span className="flex items-center gap-1.5">
+            <svg width="12" height="12" aria-hidden>
+              <circle
+                cx="6"
+                cy="6"
+                r="3.6"
+                fill="#ffffff"
+                stroke={USER_EDGE_COLOR}
+                strokeWidth="2"
+              />
+            </svg>
+            An arrow you added
+          </span>
+        ) : null}
         {kinds.map((role) => (
           <span key={role} className="flex items-center gap-1.5">
             <span
@@ -776,6 +807,9 @@ function LinkPath({
   // to finish. An effect that begins *during* a long cause must not be drawn
   // leaving from the cause's end, or the arrow would point backwards in time.
   let d: string;
+  // Roughly where the curve passes through, for the "you drew this" marker.
+  let midX: number;
+  let midY: number;
   if (arrives > causeEnds + NODE_RADIUS) {
     const x1 = causeEnds + (from.xEnd > from.x ? 2 : NODE_RADIUS);
     const dx = Math.max(18, (arrives - x1) * 0.4);
@@ -785,10 +819,14 @@ function LinkPath({
     d = delayed
       ? `M${x1} ${y1} C${x1 + dx} ${y1 - bow}, ${arrives - dx} ${y2 - bow}, ${arrives} ${y2}`
       : `M${x1} ${y1} C${x1 + dx} ${y1}, ${arrives - dx} ${y2}, ${arrives} ${y2}`;
+    midX = (x1 + arrives) / 2;
+    midY = (y1 + y2) / 2 - bow * 0.75;
   } else if (arrives > from.x + NODE_RADIUS) {
     const x1 = from.x + NODE_RADIUS + 2;
     const dx = Math.max(12, (arrives - x1) * 0.4);
     d = `M${x1} ${y1} C${x1 + dx} ${y1}, ${arrives - dx} ${y2}, ${arrives} ${y2}`;
+    midX = (x1 + arrives) / 2;
+    midY = (y1 + y2) / 2;
   } else {
     // Cause and effect are recorded at effectively the same moment, so the link
     // is a short hop between rows rather than a reach across the day.
@@ -798,6 +836,8 @@ function LinkPath({
     d =
       `M${from.x} ${startY} C${from.x + 16} ${startY + direction * 12}, ` +
       `${to.x + 16} ${endY - direction * 12}, ${to.x} ${endY}`;
+    midX = (from.x + to.x) / 2 + 8;
+    midY = (startY + endY) / 2;
   }
 
   return (
@@ -826,6 +866,19 @@ function LinkPath({
         opacity={hovered ? 1 : strength.opacity}
         markerEnd={`url(#dag-tip-${delayed ? 'delayed' : 'immediate'})`}
       />
+      {link.origin === 'user' ? (
+        // Colour and dash already carry timing, and width carries evidence, so
+        // "you drew this" gets a mark of its own rather than a fourth
+        // reinterpretation of the line itself.
+        <circle
+          cx={midX}
+          cy={midY}
+          r={3.6}
+          fill="#ffffff"
+          stroke={USER_EDGE_COLOR}
+          strokeWidth={2}
+        />
+      ) : null}
       <path d={d} fill="none" stroke="transparent" strokeWidth={12} />
     </g>
   );

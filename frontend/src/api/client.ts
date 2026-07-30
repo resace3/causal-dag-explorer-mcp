@@ -111,13 +111,42 @@ export interface DagNode extends DagVariable {
   order: number;
 }
 
+export type EdgeOrigin = 'knowledge_base' | 'user';
+export type EdgeStrength = 'established' | 'plausible' | 'speculative';
+
 export interface DagEdge {
   source: string;
   target: string;
   rationale: string;
-  strength: 'established' | 'plausible' | 'speculative';
+  strength: EdgeStrength;
   lag: string | null;
   onPath: boolean;
+  origin: EdgeOrigin;
+}
+
+/** A row in the edge editor: every edge in the model, labelled. */
+export interface CausalEdgeRow {
+  source: string;
+  target: string;
+  sourceLabel: string;
+  targetLabel: string;
+  rationale: string;
+  strength: EdgeStrength;
+  lag: string | null;
+  origin: EdgeOrigin;
+}
+
+export interface SuppressedEdgeRow {
+  source: string;
+  target: string;
+  sourceLabel: string;
+  targetLabel: string;
+}
+
+export interface CausalEdgesResponse {
+  edges: CausalEdgeRow[];
+  suppressed: SuppressedEdgeRow[];
+  note: string;
 }
 
 /** A variable's row in the time-anchored view. */
@@ -158,9 +187,10 @@ export interface DagLink {
   targetVariable: string;
   kind: 'immediate' | 'delayed';
   lagMinutes: number;
-  strength: 'established' | 'plausible' | 'speculative';
+  strength: EdgeStrength;
   rationale: string;
   onPath: boolean;
+  origin: EdgeOrigin;
 }
 
 export interface DagUnplacedEdge {
@@ -217,6 +247,23 @@ export const api = {
     ),
   dag: (body: { outcome: string; exposure: string | null; day: string | null }) =>
     request<DagResponse>('/api/dag', { method: 'POST', body: JSON.stringify(body) }),
+  causalEdges: () => request<CausalEdgesResponse>('/api/dag/edges'),
+  addCausalEdge: (body: {
+    source: string;
+    target: string;
+    rationale?: string;
+    strength?: EdgeStrength;
+  }) => request<unknown>('/api/dag/edges', { method: 'POST', body: JSON.stringify(body) }),
+  removeCausalEdge: (source: string, target: string) =>
+    request<{ restorable: boolean }>(
+      `/api/dag/edges/${encodeURIComponent(source)}/${encodeURIComponent(target)}`,
+      { method: 'DELETE' },
+    ),
+  restoreCausalEdge: (source: string, target: string) =>
+    request<unknown>(
+      `/api/dag/edges/${encodeURIComponent(source)}/${encodeURIComponent(target)}/restore`,
+      { method: 'POST' },
+    ),
   eventDetails: (eventId: string) =>
     request<EventDetailsResponse>(`/api/events/${encodeURIComponent(eventId)}`),
   rawRecord: (recordId: string) =>

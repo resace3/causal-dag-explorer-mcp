@@ -5,6 +5,9 @@ import { Sidebar } from './components/Sidebar';
 import { ErrorState, SourceNotices, TimelineSkeleton } from './components/States';
 import { TimelineControls, type ViewMode } from './components/TimelineControls';
 import { useDataSources } from './hooks/useDataSources';
+import { datesEndingAt, useDayRange } from './hooks/useDayRange';
+import { isStringArray, usePersistentState } from './hooks/usePersistentState';
+import { applyLaneOrder, moveLaneBefore } from './utilities/laneOrder';
 import { useDays } from './hooks/useDays';
 import { useTimeline } from './hooks/useTimeline';
 import { DagView } from './dag/DagView';
@@ -28,16 +31,89 @@ export function App() {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [zoom, setZoom] = useState(1);
   const [selection, setSelection] = useState<Selection | null>(null);
+  // Row order is the user's own arrangement of their view, so it outlives the
+  // page rather than resetting on every reload.
+  const [laneOrder, setLaneOrder] = usePersistentState<string[]>(
+    'lane-order',
+    [],
+    isStringArray,
+  );
+  // Which phenotypes the collapsed view leaves out, and how many days it spans.
+  const [collapsedHiddenIds, setCollapsedHiddenIds] = usePersistentState<string[]>(
+    'collapsed-hidden',
+    [],
+    isStringArray,
+  );
+  const [span, setSpan] = usePersistentState<number>(
+    'collapsed-span',
+    1,
+    (value): value is number => typeof value === 'number' && value >= 1 && value <= 14,
+  );
+
+  const collapsedHidden = useMemo(() => new Set(collapsedHiddenIds), [collapsedHiddenIds]);
+  const toggleCollapsedPhenotype = useCallback(
+    (laneId: string) => {
+      setCollapsedHiddenIds((current) =>
+        current.includes(laneId)
+          ? current.filter((id) => id !== laneId)
+          : [...current, laneId],
+      );
+    },
+    [setCollapsedHiddenIds],
+  );
+
+  // The collapsed view can reach back over several days. Only days the server
+  // has already processed load on their own; see useDayRange.
+  const rangeDates = useMemo(
+    () => (selectedDate ? datesEndingAt(selectedDate, span) : []),
+    [selectedDate, span],
+  );
+  const storedDates = useMemo(() => {
+    const stored = new Set<string>();
+    for (const [date, day] of dayIndex) {
+      if (day.stored) stored.add(date);
+    }
+    return stored;
+  }, [dayIndex]);
+  const { days: rangeDays, load: loadDay } = useDayRange(rangeDates, storedDates);
 
   // A timeline for a day the user has navigated away from is stale: showing it
   // under the new heading would attribute one day's data to another.
   const current = timeline && timeline.date === selectedDate ? timeline : null;
   const allLanes: Lane[] = current?.lanes ?? [];
   // Lanes with no data are never shown as empty rows.
-  const availableLanes = useMemo(() => allLanes.filter((lane) => lane.available), [allLanes]);
+  const unordered = useMemo(() => allLanes.filter((lane) => lane.available), [allLanes]);
+
+  /**
+   * Apply the user's row order. It is stored as a list of lane ids, which may
+   * be stale in both directions: a lane can vanish when a day has no data for
+   * it, and a new one can appear. Known lanes keep their saved position and
+   * anything unrecognised falls to the bottom in its original order, so a lane
+   * that comes back tomorrow is where it was left.
+   */
+  const availableLanes = useMemo(
+    () => applyLaneOrder(unordered, laneOrder),
+    [unordered, laneOrder],
+  );
+
   const visibleLanes = useMemo(
     () => availableLanes.filter((lane) => !hidden.has(lane.id)),
     [availableLanes, hidden],
+  );
+
+  /** Move one lane to where another currently sits, and remember it. */
+  const reorderLanes = useCallback(
+    (laneId: string, beforeLaneId: string) => {
+      setLaneOrder(
+        moveLaneBefore(
+          availableLanes.map((lane) => lane.id),
+          laneOrder,
+          laneId,
+          beforeLaneId,
+        ),
+      );
+    },
+    [availableLanes, laneOrder, setLaneOrder],
   );
 
   // A selected event belongs to the day it was found on, so changing day
@@ -141,6 +217,8 @@ export function App() {
                   onZoomChange={setZoom}
                   onRefresh={() => void refresh()}
                   refreshing={refreshing}
+                  span={span}
+                  onSpanChange={setSpan}
                 />
 
                 {mode === 'dag' ? (
@@ -158,14 +236,17 @@ export function App() {
                     selectedKey={selectedKey}
                     onSelect={setSelection}
                     zoom={zoom}
+                    onReorder={reorderLanes}
                   />
                 ) : (
                   <CollapsedTimeline
-                    timeline={current}
-                    lanes={availableLanes}
+                    days={rangeDays}
+                    hidden={collapsedHidden}
+                    onTogglePhenotype={toggleCollapsedPhenotype}
                     selectedKey={selectedKey}
                     onSelect={setSelection}
                     zoom={zoom}
+                    onLoadDay={loadDay}
                   />
                 )}
 

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Timeline } from '../src/timeline/Timeline';
@@ -9,7 +9,7 @@ import { Sidebar } from '../src/components/Sidebar';
 import { PageHeader } from '../src/components/PageHeader';
 import { SourceNotices, TimelineSkeleton } from '../src/components/States';
 import { makeEvent, makeLane, makeSeries, makeTimeline } from './fixtures';
-import type { Selection } from '../src/types/timeline';
+import type { DayTimeline, Selection } from '../src/types/timeline';
 
 const DAY_PROPS = {
   selectedDate: '2025-06-10',
@@ -187,15 +187,21 @@ describe('collapsed timeline', () => {
     expect(majorEvents(lanes)).toHaveLength(0);
   });
 
+  const asRange = (timeline: DayTimeline) => [
+    { date: timeline.date, timeline, status: 'loaded' as const },
+  ];
+
   it('renders the major events on the shared axis without causal arrows', () => {
     const timeline = makeTimeline();
     render(
       <CollapsedTimeline
-        timeline={timeline}
-        lanes={timeline.lanes}
+        days={asRange(timeline)}
+        hidden={new Set()}
+        onTogglePhenotype={vi.fn()}
         selectedKey={null}
         onSelect={vi.fn()}
         zoom={1}
+        onLoadDay={vi.fn()}
       />,
     );
     expect(screen.getByTestId('timeline-collapsed')).toBeInTheDocument();
@@ -206,6 +212,81 @@ describe('collapsed timeline', () => {
     const svg = screen.getByRole('group', { name: /Collapsed timeline/ });
     expect(svg.querySelectorAll('marker')).toHaveLength(0);
     expect(svg.querySelectorAll('[marker-end]')).toHaveLength(0);
+  });
+
+  it('hides a phenotype when its toggle is switched off', () => {
+    const timeline = makeTimeline();
+    const { rerender } = render(
+      <CollapsedTimeline
+        days={asRange(timeline)}
+        hidden={new Set()}
+        onTogglePhenotype={vi.fn()}
+        selectedKey={null}
+        onSelect={vi.fn()}
+        zoom={1}
+        onLoadDay={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Morning workout/ })).toBeInTheDocument();
+
+    rerender(
+      <CollapsedTimeline
+        days={asRange(timeline)}
+        hidden={new Set(['activity'])}
+        onTogglePhenotype={vi.fn()}
+        selectedKey={null}
+        onSelect={vi.fn()}
+        zoom={1}
+        onLoadDay={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Morning workout/ })).not.toBeInTheDocument();
+    // The toggle itself stays, so the phenotype can be brought back.
+    expect(screen.getByTestId('collapsed-toggle-activity')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('offers to fetch a day that has not been reconstructed, without doing it unasked', () => {
+    const timeline = makeTimeline();
+    const onLoadDay = vi.fn();
+    render(
+      <CollapsedTimeline
+        days={[
+          { date: '2026-07-01', timeline: null, status: 'unfetched' },
+          ...asRange(timeline),
+        ]}
+        hidden={new Set()}
+        onTogglePhenotype={vi.fn()}
+        selectedKey={null}
+        onSelect={vi.fn()}
+        zoom={1}
+        onLoadDay={onLoadDay}
+      />,
+    );
+
+    // Nothing is fetched merely by widening the window.
+    expect(onLoadDay).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('collapsed-load-2026-07-01'));
+    expect(onLoadDay).toHaveBeenCalledWith('2026-07-01');
+  });
+
+  it('shows one panel per day so day boundaries stay explicit', () => {
+    const timeline = makeTimeline();
+    render(
+      <CollapsedTimeline
+        days={[{ date: '2026-07-01', timeline: null, status: 'unfetched' }, ...asRange(timeline)]}
+        hidden={new Set()}
+        onTogglePhenotype={vi.fn()}
+        selectedKey={null}
+        onSelect={vi.fn()}
+        zoom={1}
+        onLoadDay={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('collapsed-day-2026-07-01')).toBeInTheDocument();
+    expect(screen.getByTestId(`collapsed-day-${timeline.date}`)).toBeInTheDocument();
   });
 });
 
@@ -303,6 +384,8 @@ describe('controls', () => {
       onZoomChange: vi.fn(),
       onRefresh: vi.fn(),
       refreshing: false,
+      span: 1,
+      onSpanChange: vi.fn(),
       ...overrides,
     };
     render(<TimelineControls {...props} />);

@@ -67,7 +67,6 @@ test.describe('Yesterday timeline', () => {
     await expect(dag.locator('[data-testid^="dag-node-"]').first()).toBeVisible({
       timeout: 30_000,
     });
-    await expect(dag.getByText(/assumptions, not findings/)).toBeVisible();
 
     // Naming an exposure adds the roles that only exist relative to one.
     await page.getByTestId('dag-exposure').selectOption('exercise');
@@ -132,12 +131,12 @@ test.describe('Yesterday timeline', () => {
       /could not be drawn/i,
       /What this implies for an analysis/i,
       /Hypothesised structure/i,
+      /assumptions, not findings/i,
     ]) {
       await expect(dag.getByText(removed)).toHaveCount(0);
     }
 
-    // The graph, its legend and the standing disclaimer are what remain.
-    await expect(dag.getByText(/assumptions, not findings/)).toBeVisible();
+    // The graph and its legend are what remain.
     await expect(dag.getByText(/Immediate — within 2 hours/)).toBeVisible();
   });
 
@@ -323,10 +322,19 @@ test.describe('Yesterday timeline', () => {
       return response.json();
     });
     expect(payload.estimated).toBe(false);
+    expect(payload.disclaimer).toMatch(/not an estimate/i);
 
+    // The on-page disclaimer was removed at the owner's request, so the guard
+    // is now that nothing on the page can be *read* as a measured result.
     const text = ((await page.locator('body').innerText()) ?? '').toLowerCase();
-    expect(text).toContain('assumptions, not findings');
-    for (const phrase of ['p =', 'p-value', 'effect size', 'significant']) {
+    for (const phrase of [
+      'p =',
+      'p-value',
+      'effect size',
+      'significant',
+      'correlation',
+      'caused',
+    ]) {
       expect(text).not.toContain(phrase);
     }
   });

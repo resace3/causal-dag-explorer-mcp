@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .knowledge import EDGES, Graph, variable
+from .knowledge import EDGES, CausalEdge, Graph, variable
 
 MAX_ANCESTOR_DEPTH = 2
 
@@ -66,6 +66,10 @@ class DagEdge:
     on_path: bool = False
     """True when the edge lies on a directed exposure → outcome path."""
 
+    origin: str = "knowledge_base"
+    """"knowledge_base" or "user" — never collapsed, so a reader can always
+    tell a published prior from one the user drew themselves."""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "source": self.source,
@@ -74,6 +78,7 @@ class DagEdge:
             "strength": self.strength,
             "lag": self.lag,
             "onPath": self.on_path,
+            "origin": self.origin,
         }
 
 
@@ -113,12 +118,20 @@ def build_dag(
     outcome: str,
     exposure: str | None = None,
     observed: set[str] | None = None,
+    edges: list[CausalEdge] | None = None,
 ) -> Dag:
-    """Assemble the expected DAG for `outcome`, optionally given `exposure`."""
-    graph = Graph()
+    """Assemble the expected DAG for `outcome`, optionally given `exposure`.
+
+    `edges` defaults to the published knowledge base. The API passes the
+    user-edited edge list instead, so an arrow the user added or removed is
+    reflected in the roles, the adjustment set and the collider warnings —
+    editing the model has to change the conclusions, or it is decoration.
+    """
+    edges = EDGES if edges is None else edges
+    graph = Graph(edges=list(edges))
     observed = observed or set()
 
-    if outcome not in {edge.target for edge in EDGES} | {edge.source for edge in EDGES}:
+    if outcome not in {edge.target for edge in edges} | {edge.source for edge in edges}:
         raise ValueError(f"'{outcome}' is not a variable in the causal knowledge base.")
     if exposure == outcome:
         raise ValueError("The exposure and the outcome must be different variables.")
@@ -168,7 +181,7 @@ def build_dag(
             )
         )
 
-    for edge in EDGES:
+    for edge in edges:
         if edge.source in included and edge.target in included:
             dag.edges.append(
                 DagEdge(
@@ -178,6 +191,7 @@ def build_dag(
                     strength=edge.strength,
                     lag=edge.lag,
                     on_path=(edge.source, edge.target) in path_edges,
+                    origin=edge.origin,
                 )
             )
 
@@ -214,7 +228,7 @@ def _exposure_outcome(
     # Colliders worth warning about: common effects of two included variables.
     candidates = on_paths | confounders | {exposure, outcome}
     colliders = set()
-    for node in {edge.target for edge in EDGES}:
+    for node in {edge.target for edge in graph.edges}:
         if node in candidates:
             continue
         parents = set(graph.parents(node))

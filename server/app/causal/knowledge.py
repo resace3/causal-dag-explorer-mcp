@@ -53,6 +53,11 @@ class CausalEdge:
     lag: str | None = None
     """Roughly how long the effect is expected to take, when known."""
 
+    origin: Literal["knowledge_base", "user"] = "knowledge_base"
+    """Who proposed this arrow. The published priors and the user's own
+    additions are both hypotheses, but conflating them would hide which is
+    which — so the distinction is carried all the way to the drawing."""
+
 
 VARIABLES: dict[str, Variable] = {
     variable.id: variable

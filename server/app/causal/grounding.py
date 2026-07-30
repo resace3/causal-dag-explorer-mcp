@@ -168,6 +168,7 @@ class Link:
     strength: str
     rationale: str
     on_path: bool
+    origin: str = "knowledge_base"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -180,6 +181,7 @@ class Link:
             "strength": self.strength,
             "rationale": self.rationale,
             "onPath": self.on_path,
+            "origin": self.origin,
         }
 
 
@@ -505,6 +507,7 @@ def _link(dag: Dag, grounded: GroundedDag, by_variable: dict[str, list[Occurrenc
                     strength=edge.strength,
                     rationale=edge.rationale,
                     on_path=edge.on_path,
+                    origin=edge.origin,
                 )
             )
             linked = True

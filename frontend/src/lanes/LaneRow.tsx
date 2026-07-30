@@ -1,4 +1,4 @@
-import { LaneIcon } from '../components/Icons';
+import { ChevronDownIcon, ChevronUpIcon, GripIcon, LaneIcon } from '../components/Icons';
 import type { DayScale } from '../timeline/scale';
 import type { Lane, Selection } from '../types/timeline';
 import { accentTheme, laneHeight } from '../utilities/lanes';
@@ -21,14 +21,87 @@ function renderer(lane: Lane): (props: LaneRenderProps) => JSX.Element {
   return EventLane;
 }
 
-export function LaneLabel({ lane }: { lane: Lane }) {
+export interface LaneReorder {
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onDragStart: () => void;
+  onDragOver: () => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
+  dragging: boolean;
+  /** True while a dragged row is hovering over this one. */
+  dropTarget: boolean;
+}
+
+export function LaneLabel({ lane, reorder }: { lane: Lane; reorder?: LaneReorder }) {
   const theme = accentTheme(lane.accent);
+
   return (
     <div
-      className="flex items-center gap-3 border-b border-slate-100 px-5"
+      className={`group relative flex items-center gap-2 border-b border-slate-100 pl-2 pr-5 transition ${
+        reorder?.dragging ? 'opacity-40' : ''
+      } ${reorder?.dropTarget ? 'bg-slate-50' : ''}`}
       style={{ height: laneHeight(lane.id) }}
       data-testid={`lane-label-${lane.id}`}
+      draggable={reorder ? true : undefined}
+      onDragStart={reorder?.onDragStart}
+      onDragOver={
+        reorder
+          ? (event) => {
+              event.preventDefault(); // without this the drop never fires
+              reorder.onDragOver();
+            }
+          : undefined
+      }
+      onDrop={
+        reorder
+          ? (event) => {
+              event.preventDefault();
+              reorder.onDrop();
+            }
+          : undefined
+      }
+      onDragEnd={reorder?.onDragEnd}
     >
+      {/* A line across the top marks where the dragged row would land. */}
+      {reorder?.dropTarget ? (
+        <span
+          className="pointer-events-none absolute inset-x-2 top-0 h-0.5 rounded bg-slate-400"
+          aria-hidden
+        />
+      ) : null}
+
+      {reorder ? (
+        <span
+          className="flex w-5 shrink-0 cursor-grab flex-col items-center text-slate-300 opacity-0 transition group-hover:opacity-100 active:cursor-grabbing"
+          data-testid={`lane-grip-${lane.id}`}
+        >
+          <button
+            type="button"
+            onClick={reorder.onMoveUp}
+            disabled={!reorder.canMoveUp}
+            aria-label={`Move ${lane.label} up`}
+            data-testid={`lane-move-up-${lane.id}`}
+            className="rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-0"
+          >
+            <ChevronUpIcon size={13} />
+          </button>
+          <GripIcon size={14} />
+          <button
+            type="button"
+            onClick={reorder.onMoveDown}
+            disabled={!reorder.canMoveDown}
+            aria-label={`Move ${lane.label} down`}
+            data-testid={`lane-move-down-${lane.id}`}
+            className="rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-0"
+          >
+            <ChevronDownIcon size={13} />
+          </button>
+        </span>
+      ) : null}
+
       <span
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border"
         style={{ borderColor: theme.soft, backgroundColor: `${theme.band}`, color: theme.stroke }}

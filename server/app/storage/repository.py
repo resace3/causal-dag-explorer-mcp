@@ -17,6 +17,7 @@ from ..models.raw import RawRecord
 from ..models.timeline import DayTimeline, TimelineEvent
 from .models import (
     DayTimelineRow,
+    CausalEdgeOverrideRow,
     LaneConfigRow,
     RawRecordRow,
     SyncRunRow,
@@ -241,6 +242,46 @@ class Repository:
                 )
             session.commit()
         return self.get_lane_config()
+
+    # -- causal edge overrides -------------------------------------------
+
+    def get_edge_overrides(self) -> list[CausalEdgeOverrideRow]:
+        with self.session() as session:
+            return list(session.exec(select(CausalEdgeOverrideRow)).all())
+
+    def set_edge_override(
+        self,
+        *,
+        source: str,
+        target: str,
+        action: str,
+        rationale: str = "",
+        strength: str = "plausible",
+        lag: str | None = None,
+    ) -> None:
+        with self.session() as session:
+            session.merge(
+                CausalEdgeOverrideRow(
+                    source=source,
+                    target=target,
+                    action=action,
+                    rationale=rationale,
+                    strength=strength,
+                    lag=lag,
+                    updated_at=datetime.now().astimezone(),
+                )
+            )
+            session.commit()
+
+    def clear_edge_override(self, *, source: str, target: str) -> bool:
+        """Drop an override, restoring whatever the knowledge base says."""
+        with self.session() as session:
+            row = session.get(CausalEdgeOverrideRow, (source, target))
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
 
     # -- maintenance -----------------------------------------------------
 

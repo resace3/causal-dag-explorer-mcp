@@ -68,4 +68,24 @@ class LaneConfigRow(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
 
 
+class CausalEdgeOverrideRow(SQLModel, table=True):
+    """A user's edit to the causal knowledge base.
+
+    Edits are stored as overrides rather than by rewriting `knowledge.py`, so
+    the published priors stay intact and auditable: at any point you can see
+    which arrows are the literature's and which are yours. `action` is "add"
+    for an arrow the user drew, "remove" for a built-in one they rejected.
+    """
+
+    __tablename__ = "causal_edge_overrides"
+
+    source: str = Field(primary_key=True)
+    target: str = Field(primary_key=True)
+    action: str = "add"
+    rationale: str = ""
+    strength: str = "plausible"
+    lag: str | None = None
+    updated_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+
+
 Index("ix_raw_records_day_stream", RawRecordRow.day, RawRecordRow.stream)

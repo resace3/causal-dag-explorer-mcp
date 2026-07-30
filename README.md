@@ -85,6 +85,15 @@ day could not place are listed rather than dropped.
 Nothing is invented. A lane with no data hides itself and says why; a stream
 that stopped reporting is drawn as a hatched gap rather than a smooth line.
 
+### Arranging the rows
+
+Each row has a handle on hover: drag it, or use the up/down buttons beside it,
+and the order is remembered. The saved order is a list of lane ids and is
+routinely stale in both directions — a lane vanishes on a day with no data for
+it, and a new one appears when a source starts reporting — so a lane that
+disappears today and returns tomorrow comes back where you left it, and a lane
+you have never arranged joins at the bottom rather than jumping to the top.
+
 ### The lanes
 
 | Lane | What it shows | Source |
@@ -117,6 +126,31 @@ one place.
 **Only read-only tools are ever called.** The Garmin MCP also exposes tools that
 create workouts and delete courses; `app/connectors/mcp_client.py` enforces an
 allow-list and refuses anything outside it before the call leaves this process.
+
+---
+
+## Collapsed mode
+
+The **Collapsed** tab reduces the day to its major events on one line. Two
+controls shape it:
+
+- **Phenotype toggles** switch individual streams in and out, because a busy day
+  puts more on one line than one line can hold.
+- **1 / 3 / 7 days** widens the window into the days before the selected one,
+  scrolling horizontally. The selected day is the rightmost panel and the view
+  opens there, with history to its left.
+
+Each day is drawn as its own panel with its own scale rather than laid on one
+continuous ruler. A day is 23 or 25 hours across a daylight-saving change, so a
+single linear ruler would either misplace the boundaries or silently stretch one
+day; a panel per day keeps every day internally exact and makes the boundary
+explicit.
+
+**Widening the window never triggers a sync.** Only days the server has already
+processed load on their own — reconstructing a new day goes out to Home
+Assistant and the wearable MCP and can take the better part of a minute, and
+five of those firing because you clicked *7 days* would be a nasty surprise. An
+unprocessed day shows a **Fetch this day** button instead.
 
 ---
 
@@ -588,6 +622,9 @@ configuration. If you prefer to pass them explicitly, add an `env` block.
 | `list_days` | List the days the calendar can offer, and which already hold data. |
 | `get_expected_dag` | Build the expected causal graph for an outcome (and optional exposure). A hypothesis, never an estimate. |
 | `list_causal_variables` | List variables usable as an exposure or outcome, and whether each was observed. |
+
+Edge edits made in the UI are stored server-side, so `get_expected_dag` reflects
+them too.
 | `get_data_sources` | Status and capabilities of every configured source. |
 | `get_event_details` | Complete metadata and provenance for one event id. |
 | `refresh_timeline` | Re-run synchronization and feature engineering. |
