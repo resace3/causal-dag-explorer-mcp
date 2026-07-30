@@ -1,5 +1,7 @@
 /**
- * Editing the causal model: adding an arrow, removing one, putting it back.
+ * The list behind the canvas: every arrow in the model, with removal and
+ * restore. Arrows are *drawn* by dragging between rows on the graph itself;
+ * this is the ledger of what that has produced.
  *
  * The knowledge base is a published prior, not gospel — you may know something
  * about yourself no paper does. What the editor will not do is let the two
@@ -12,33 +14,16 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  api,
-  type CausalEdgeRow,
-  type CausalEdgesResponse,
-  type DagVariable,
-  type EdgeStrength,
-} from '../api/client';
+import { api, type CausalEdgeRow, type CausalEdgesResponse } from '../api/client';
 import { CloseIcon, RefreshIcon } from '../components/Icons';
 
-const STRENGTHS: { value: EdgeStrength; label: string }[] = [
-  { value: 'established', label: 'Well established' },
-  { value: 'plausible', label: 'Plausible' },
-  { value: 'speculative', label: 'Speculative' },
-];
-
 interface EdgeEditorProps {
-  variables: DagVariable[];
   /** Called after any successful change, so the graph refetches. */
   onChanged: () => void;
 }
 
-export function EdgeEditor({ variables, onChanged }: EdgeEditorProps) {
+export function EdgeEditor({ onChanged }: EdgeEditorProps) {
   const [data, setData] = useState<CausalEdgesResponse | null>(null);
-  const [source, setSource] = useState('');
-  const [target, setTarget] = useState('');
-  const [strength, setStrength] = useState<EdgeStrength>('plausible');
-  const [rationale, setRationale] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState('');
@@ -68,22 +53,6 @@ export function EdgeEditor({ variables, onChanged }: EdgeEditorProps) {
     }
   };
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!source || !target) {
-      setError('Choose both a cause and an effect.');
-      return;
-    }
-    const ok = await run(() =>
-      api.addCausalEdge({ source, target, rationale: rationale.trim(), strength }),
-    );
-    if (ok) {
-      setRationale('');
-      setSource('');
-      setTarget('');
-    }
-  };
-
   const shown = (data?.edges ?? []).filter((edge) => {
     if (!filter.trim()) return true;
     const needle = filter.toLowerCase();
@@ -100,83 +69,6 @@ export function EdgeEditor({ variables, onChanged }: EdgeEditorProps) {
       className="border-t border-slate-100 bg-slate-50/60 px-5 py-4"
       data-testid="dag-edge-editor"
     >
-      <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-500">
-          Cause
-          <select
-            value={source}
-            data-testid="edge-source"
-            onChange={(event) => setSource(event.target.value)}
-            className="w-44 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px] font-normal text-slate-700"
-          >
-            <option value="">— choose —</option>
-            {variables.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <span className="pb-2 text-slate-400" aria-hidden>
-          →
-        </span>
-
-        <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-500">
-          Effect
-          <select
-            value={target}
-            data-testid="edge-target"
-            onChange={(event) => setTarget(event.target.value)}
-            className="w-44 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px] font-normal text-slate-700"
-          >
-            <option value="">— choose —</option>
-            {variables
-              .filter((item) => item.id !== source)
-              .map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-          </select>
-        </label>
-
-        <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-500">
-          Evidence
-          <select
-            value={strength}
-            data-testid="edge-strength"
-            onChange={(event) => setStrength(event.target.value as EdgeStrength)}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px] font-normal text-slate-700"
-          >
-            {STRENGTHS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="flex min-w-[180px] flex-1 flex-col gap-1 text-[11px] font-medium text-slate-500">
-          Why (optional)
-          <input
-            value={rationale}
-            data-testid="edge-rationale"
-            onChange={(event) => setRationale(event.target.value)}
-            placeholder="What makes you think this?"
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px] font-normal text-slate-700"
-          />
-        </label>
-
-        <button
-          type="submit"
-          disabled={busy}
-          data-testid="edge-add"
-          className="rounded-lg bg-slate-800 px-3 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-slate-700 disabled:opacity-50"
-        >
-          Add arrow
-        </button>
-      </form>
 
       {error ? (
         <p

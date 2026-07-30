@@ -119,6 +119,82 @@ test.describe('Yesterday timeline', () => {
     expect(backwards).toBe(0);
   });
 
+  test('draws a causal arrow by dragging between rows', async ({ page }) => {
+    // Editing lists every variable, so both ends of the drag need to fit.
+    await page.setViewportSize({ width: 1400, height: 1200 });
+    await waitForTimeline(page);
+    await page.getByTestId('mode-dag').click();
+    const dag = page.getByTestId('timeline-dag');
+    await expect(dag).toBeVisible();
+    await page.getByTestId('dag-edit-toggle').click();
+
+    // Editing gives every variable a row, including ones with no data today —
+    // otherwise the arrows most worth adding could never be drawn.
+    const anchor = page.getByTestId('dag-anchor-stress');
+    await expect(anchor).toBeVisible({ timeout: 30_000 });
+
+    const handle = page.getByTestId('dag-handle-stress');
+    await handle.scrollIntoViewIfNeeded();
+    const from = await handle.boundingBox();
+    expect(from).not.toBeNull();
+
+    await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from!.x + 150, from!.y + 40, { steps: 10 });
+
+    // Whole rows are the drop target, and only exist mid-drag.
+    const drop = page.getByTestId('dag-drop-device_use');
+    const to = await drop.boundingBox();
+    expect(to).not.toBeNull();
+    await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    // The arrow is now in the model, and labelled as the user's.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(async () => {
+            const response = await fetch('/api/dag/edges');
+            const body = await response.json();
+            return body.edges.filter(
+              (edge: { source: string; target: string; origin: string }) =>
+                edge.source === 'stress' && edge.target === 'device_use',
+            ).length;
+          }),
+        { timeout: 20_000 },
+      )
+      .toBe(1);
+
+    // Clean up so the run is repeatable.
+    await page.evaluate(() =>
+      fetch('/api/dag/edges/stress/device_use', { method: 'DELETE' }),
+    );
+  });
+
+  test('refuses a dragged arrow that would create a cycle, and says why', async ({ page }) => {
+    await page.setViewportSize({ width: 1400, height: 1200 });
+    await waitForTimeline(page);
+    await page.getByTestId('mode-dag').click();
+    await page.getByTestId('dag-edit-toggle').click();
+    await expect(page.getByTestId('dag-anchor-stress')).toBeVisible({ timeout: 30_000 });
+
+    // sleep_onset -> sleep_duration is in the model, so the reverse closes a
+    // loop. Both are on screen for this outcome.
+    const handle = page.getByTestId('dag-handle-sleep_duration').first();
+    await handle.scrollIntoViewIfNeeded();
+    const from = await handle.boundingBox();
+    await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from!.x + 120, from!.y + 30, { steps: 8 });
+    const to = await page.getByTestId('dag-drop-sleep_onset').boundingBox();
+    await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 8 });
+    await page.mouse.up();
+
+    const error = page.getByTestId('dag-edit-error');
+    await expect(error).toBeVisible({ timeout: 20_000 });
+    await expect(error).toContainText(/cycle/i);
+  });
+
   test('keeps the DAG to the graph itself, with no prose below it', async ({ page }) => {
     await waitForTimeline(page);
     await page.getByTestId('mode-dag').click();

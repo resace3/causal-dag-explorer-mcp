@@ -16,7 +16,7 @@
  * read as evidence of absence.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api,
   type DagLink,
@@ -29,7 +29,7 @@ import { useElementWidth } from '../hooks/useElementWidth';
 import { VariableIcon } from '../components/Icons';
 import { EdgeEditor } from './EdgeEditor';
 import { AxisRow, GridLines } from '../timeline/Axis';
-import { createScale } from '../timeline/scale';
+import { PAD_LEFT, createScale } from '../timeline/scale';
 import { AXIS_HEIGHT, LANE_LABEL_WIDTH } from '../utilities/lanes';
 import { formatTime } from '../utilities/time';
 
@@ -221,6 +221,12 @@ export function DagView({ date }: { date: string | null }) {
   const [editing, setEditing] = useState(false);
   // Bumped by the editor so an added or removed arrow rebuilds the graph.
   const [edgeRevision, setEdgeRevision] = useState(0);
+  // A connection being dragged out of a node, and where the pointer is now.
+  const [connect, setConnect] = useState<{ from: string; x: number; y: number } | null>(null);
+  const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
+  const [hoverRow, setHoverRow] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const { ref, width } = useElementWidth<HTMLDivElement>(900);
   const requestId = useRef(0);
 
@@ -265,12 +271,21 @@ export function DagView({ date }: { date: string | null }) {
     [placed, plotWidth],
   );
 
-  /** Rows the day can actually draw, kept in the backend's cause-first order. */
+  /**
+   * Rows the day can actually draw, kept in the backend's cause-first order.
+   *
+   * While editing, every variable in the graph gets a row even when the day
+   * recorded nothing for it — otherwise there would be no way to draw an arrow
+   * to stress or work schedule, which are exactly the ones worth adding. In
+   * view mode the original rule holds: a row appears only when the day has
+   * something to put on it.
+   */
   const rows = useMemo(() => {
     if (!placed) return [];
+    if (editing) return placed.rows;
     const withData = new Set(placed.occurrences.map((item) => item.variable));
     return placed.rows.filter((row) => withData.has(row.variable));
-  }, [placed]);
+  }, [placed, editing]);
 
   const rowIndex = useMemo(
     () => new Map(rows.map((row, index) => [row.variable, index])),
@@ -295,6 +310,107 @@ export function DagView({ date }: { date: string | null }) {
     }
     return { nodes, byId: new Map(nodes.map((node) => [node.occurrence.id, node])) };
   }, [scale, placed, rowIndex, rows]);
+
+  /** Where the pointer is, in the SVG's own coordinates. */
+  const toSvgPoint = useCallback((event: { clientX: number; clientY: number }) => {
+    const box = svgRef.current?.getBoundingClientRect();
+    if (!box) return null;
+    return { x: event.clientX - box.left, y: event.clientY - box.top };
+  }, []);
+
+  const startConnect = useCallback(
+    (variable: string, x: number, y: number) => {
+      setEditError(null);
+      setConnect({ from: variable, x, y });
+      setPointer({ x, y });
+    },
+    [],
+  );
+
+  const finishConnect = useCallback(
+    (targetVariable: string) => {
+      const from = connect?.from;
+      setConnect(null);
+      setPointer(null);
+      setHoverRow(null);
+      if (!from || from === targetVariable) return;
+
+      void api
+        .addCausalEdge({ source: from, target: targetVariable })
+        .then(() => {
+          setEditError(null);
+          setEdgeRevision((value) => value + 1);
+        })
+        .catch((cause) => {
+          // A refused arrow — a cycle, or one already in the model — has to say
+          // why, or the drag just appears to have done nothing.
+          setEditError(cause instanceof Error ? cause.message : String(cause));
+        });
+    },
+    [connect],
+  );
+
+  /**
+   * While a connection is being dragged: track the pointer even once it leaves
+   * the canvas, scroll the page when it nears an edge, and cancel on release or
+   * Escape.
+   *
+   * The auto-scroll is what makes the feature usable at all. Editing shows a
+   * row for every variable in the graph, which is taller than the window, so
+   * without it the rows you most want to reach — the ones off the bottom —
+   * simply could not be dropped on.
+   */
+  useEffect(() => {
+    if (!connect) return undefined;
+    const EDGE = 90;
+    let frame = 0;
+    let clientY = 0;
+
+    const step = () => {
+      const top = clientY - EDGE;
+      const bottom = clientY - (window.innerHeight - EDGE);
+      if (top < 0) window.scrollBy(0, Math.max(-24, top / 4));
+      else if (bottom > 0) window.scrollBy(0, Math.min(24, bottom / 4));
+      frame = window.requestAnimationFrame(step);
+    };
+
+    const onMove = (event: MouseEvent) => {
+      clientY = event.clientY;
+      const point = toSvgPoint(event);
+      if (point) setPointer(point);
+    };
+    const cancel = () => {
+      setConnect(null);
+      setPointer(null);
+      setHoverRow(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') cancel();
+    };
+
+    frame = window.requestAnimationFrame(step);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', cancel);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', cancel);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [connect, toSvgPoint]);
+
+  const removeEdge = useCallback((source: string, target: string) => {
+    void api
+      .removeCausalEdge(source, target)
+      .then(() => {
+        setEditError(null);
+        setEdgeRevision((value) => value + 1);
+      })
+      .catch((cause) => {
+        setEditError(cause instanceof Error ? cause.message : String(cause));
+      });
+  }, []);
 
   /** Drop a caption when an earlier node in the same row is too close. */
   const captionVisible = useMemo(() => {
@@ -352,10 +468,27 @@ export function DagView({ date }: { date: string | null }) {
       </div>
 
       {editing ? (
-        <EdgeEditor
-          variables={variables}
-          onChanged={() => setEdgeRevision((value) => value + 1)}
-        />
+        <>
+          <p className="flex items-center gap-2 border-b border-slate-100 bg-violet-50/50 px-5 py-2 text-[12px] text-violet-900">
+            <span
+              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2"
+              style={{ borderColor: USER_EDGE_COLOR }}
+              aria-hidden
+            />
+            Drag the dot on a node onto another row to draw an arrow. Hover an arrow to
+            remove it. Every variable in this graph has a row while editing, even the ones
+            today recorded nothing for.
+          </p>
+          {editError ? (
+            <p
+              role="alert"
+              data-testid="dag-edit-error"
+              className="border-b border-rose-100 bg-rose-50 px-5 py-2 text-[12px] leading-relaxed text-rose-800"
+            >
+              {editError}
+            </p>
+          ) : null}
+        </>
       ) : null}
 
       {error ? (
@@ -393,13 +526,14 @@ export function DagView({ date }: { date: string | null }) {
               <div style={{ width: plotWidth }}>
                 <AxisRow scale={scale} position="top" />
                 <svg
+                  ref={svgRef}
                   width={plotWidth}
                   height={height}
                   role="group"
                   aria-label={`Causal graph for ${
                     dag?.outcome ?? 'the outcome'
                   }, placed on the day's clock`}
-                  className="block"
+                  className={`block ${connect ? 'cursor-crosshair' : ''}`}
                 >
                   <defs>
                     <marker
@@ -433,7 +567,13 @@ export function DagView({ date }: { date: string | null }) {
                       y={index * ROW_HEIGHT}
                       width={plotWidth}
                       height={ROW_HEIGHT}
-                      fill={index % 2 === 0 ? '#ffffff' : '#fafbfc'}
+                      fill={
+                        hoverRow === row.variable && connect && connect.from !== row.variable
+                          ? '#eef2ff'
+                          : index % 2 === 0
+                            ? '#ffffff'
+                            : '#fafbfc'
+                      }
                     />
                   ))}
                   <GridLines scale={scale} height={height} />
@@ -460,6 +600,8 @@ export function DagView({ date }: { date: string | null }) {
                       }
                       onHover={setHovered}
                       timeZone={placed.localTimezone}
+                      editing={editing}
+                      onRemove={removeEdge}
                     />
                   ))}
 
@@ -471,6 +613,9 @@ export function DagView({ date }: { date: string | null }) {
                       selected={selected?.id === node.occurrence.id}
                       showCaption={captionVisible.has(node.occurrence.id)}
                       plotWidth={plotWidth}
+                      editing={editing}
+                      connecting={connect?.from === node.occurrence.variable}
+                      onStartConnect={startConnect}
                       onSelect={(occurrence) =>
                         setSelected((current) =>
                           current?.id === occurrence.id ? null : occurrence,
@@ -478,6 +623,61 @@ export function DagView({ date }: { date: string | null }) {
                       }
                     />
                   ))}
+
+                  {/* Variables the day recorded nothing for still need somewhere
+                      to grab, or the arrows most worth adding — to stress, to
+                      work schedule — could never be drawn. */}
+                  {editing
+                    ? rows.map((row, index) =>
+                        geometry.nodes.some((node) => node.occurrence.variable === row.variable)
+                          ? null
+                          : (
+                              <Anchor
+                                key={`anchor-${row.variable}`}
+                                row={row}
+                                x={PAD_LEFT + 22}
+                                y={index * ROW_HEIGHT + ROW_HEIGHT / 2}
+                                connecting={connect?.from === row.variable}
+                                onStartConnect={startConnect}
+                              />
+                            ),
+                      )
+                    : null}
+
+                  {/* Whole rows are the drop target: aiming at a node would
+                      make connecting fiddly, and every node in a row stands for
+                      the same variable anyway. Live only mid-drag so it never
+                      swallows a click. */}
+                  {connect
+                    ? rows.map((row, index) => (
+                        <rect
+                          key={`drop-${row.variable}`}
+                          x={0}
+                          y={index * ROW_HEIGHT}
+                          width={plotWidth}
+                          height={ROW_HEIGHT}
+                          fill="transparent"
+                          data-testid={`dag-drop-${row.variable}`}
+                          onMouseEnter={() => setHoverRow(row.variable)}
+                          onMouseUp={() => finishConnect(row.variable)}
+                        />
+                      ))
+                    : null}
+
+                  {connect && pointer ? (
+                    <g pointerEvents="none">
+                      <path
+                        d={`M${connect.x} ${connect.y} C${connect.x + 40} ${connect.y}, ${
+                          pointer.x - 40
+                        } ${pointer.y}, ${pointer.x} ${pointer.y}`}
+                        fill="none"
+                        stroke={USER_EDGE_COLOR}
+                        strokeWidth={2}
+                        strokeDasharray="5 4"
+                      />
+                      <circle cx={pointer.x} cy={pointer.y} r={4} fill={USER_EDGE_COLOR} />
+                    </g>
+                  ) : null}
                 </svg>
                 <AxisRow scale={scale} position="bottom" />
               </div>
@@ -595,6 +795,11 @@ export function DagView({ date }: { date: string | null }) {
         </div>
       ) : null}
 
+      {editing ? (
+        <EdgeEditor
+          onChanged={() => setEdgeRevision((value) => value + 1)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -607,12 +812,55 @@ interface PlacedNode {
   role: string;
 }
 
+/**
+ * The grab point for drawing an arrow, in the style of a diagram editor: a
+ * small dot on the node's trailing edge. A dedicated handle rather than the
+ * whole node, so clicking a node still opens its detail instead of starting a
+ * drag every time.
+ */
+function ConnectHandle({
+  x,
+  y,
+  active,
+  onStart,
+  testId,
+}: {
+  x: number;
+  y: number;
+  active: boolean;
+  onStart: (x: number, y: number) => void;
+  testId: string;
+}) {
+  return (
+    <circle
+      cx={x}
+      cy={y}
+      r={5.5}
+      fill={active ? USER_EDGE_COLOR : '#ffffff'}
+      stroke={USER_EDGE_COLOR}
+      strokeWidth={2}
+      className="cursor-crosshair"
+      data-testid={testId}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        onStart(x, y);
+      }}
+    >
+      <title>Drag to another row to draw an arrow</title>
+    </circle>
+  );
+}
+
 function Node({
   node,
   timeZone,
   selected,
   showCaption,
   plotWidth,
+  editing,
+  connecting,
+  onStartConnect,
   onSelect,
 }: {
   node: PlacedNode;
@@ -620,6 +868,9 @@ function Node({
   selected: boolean;
   showCaption: boolean;
   plotWidth: number;
+  editing: boolean;
+  connecting: boolean;
+  onStartConnect: (variable: string, x: number, y: number) => void;
   onSelect: (occurrence: DagOccurrence) => void;
 }) {
   const { occurrence, x, xEnd, y } = node;
@@ -773,6 +1024,77 @@ function Node({
         height={(NODE_RADIUS + 4) * 2}
         fill="transparent"
       />
+
+      {editing ? (
+        <ConnectHandle
+          x={Math.max(x, xEnd) + NODE_RADIUS + 3}
+          y={y}
+          active={connecting}
+          testId={`dag-handle-${occurrence.variable}`}
+          onStart={(hx, hy) => onStartConnect(occurrence.variable, hx, hy)}
+        />
+      ) : null}
+    </g>
+  );
+}
+
+/**
+ * A stand-in node for a variable the day recorded nothing for. Only drawn while
+ * editing: in view mode an empty row would assert a presence the data does not
+ * support, but while wiring the model you have to be able to reach it.
+ */
+function Anchor({
+  row,
+  x,
+  y,
+  connecting,
+  onStartConnect,
+}: {
+  row: DagRow;
+  x: number;
+  y: number;
+  connecting: boolean;
+  onStartConnect: (variable: string, x: number, y: number) => void;
+}) {
+  const style = roleStyle(row.role);
+  return (
+    <g data-testid={`dag-anchor-${row.variable}`}>
+      <title>{`${row.label} — ${row.note}`}</title>
+      <circle
+        cx={x}
+        cy={y}
+        r={NODE_RADIUS}
+        fill="#ffffff"
+        stroke={style.solid}
+        strokeWidth={1.4}
+        strokeDasharray="4 3"
+        opacity={0.85}
+      />
+      <g
+        transform={`translate(${x - ICON_SIZE / 2}, ${y - ICON_SIZE / 2})`}
+        style={{ color: style.solid }}
+        opacity={0.6}
+        pointerEvents="none"
+      >
+        <VariableIcon variable={row.variable} size={ICON_SIZE} strokeWidth={1.7} />
+      </g>
+      <text
+        x={x}
+        y={y + NODE_RADIUS + 14}
+        textAnchor="middle"
+        fontSize={9.5}
+        fill="#94a3b8"
+        pointerEvents="none"
+      >
+        no data this day
+      </text>
+      <ConnectHandle
+        x={x + NODE_RADIUS + 3}
+        y={y}
+        active={connecting}
+        testId={`dag-handle-${row.variable}`}
+        onStart={(hx, hy) => onStartConnect(row.variable, hx, hy)}
+      />
     </g>
   );
 }
@@ -784,6 +1106,8 @@ function LinkPath({
   hovered,
   onHover,
   timeZone,
+  editing,
+  onRemove,
 }: {
   link: DagLink;
   from: PlacedNode | undefined;
@@ -791,6 +1115,8 @@ function LinkPath({
   hovered: boolean;
   onHover: (link: DagLink | null) => void;
   timeZone: string;
+  editing: boolean;
+  onRemove: (source: string, target: string) => void;
 }) {
   if (!from || !to) return null;
 
@@ -880,6 +1206,30 @@ function LinkPath({
         />
       ) : null}
       <path d={d} fill="none" stroke="transparent" strokeWidth={12} />
+
+      {/* While editing, an arrow carries its own delete control at the midpoint
+          — the same place the eye already goes when hovering it. */}
+      {editing && hovered ? (
+        <g
+          className="cursor-pointer"
+          data-testid={`dag-link-remove-${link.sourceVariable}-${link.targetVariable}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove(link.sourceVariable, link.targetVariable);
+          }}
+        >
+          <title>{`Remove ${link.sourceVariable} → ${link.targetVariable}`}</title>
+          <circle cx={midX} cy={midY} r={9} fill="#ffffff" stroke="#e11d48" strokeWidth={1.6} />
+          <path
+            d={`M${midX - 3.5} ${midY - 3.5}L${midX + 3.5} ${midY + 3.5}M${midX + 3.5} ${
+              midY - 3.5
+            }L${midX - 3.5} ${midY + 3.5}`}
+            stroke="#e11d48"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+          />
+        </g>
+      ) : null}
     </g>
   );
 }
