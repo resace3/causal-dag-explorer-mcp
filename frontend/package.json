@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:install": "playwright install chromium"
+    "test:e2e:install": "playwright install chromium",
+    "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

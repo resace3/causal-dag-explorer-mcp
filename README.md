@@ -805,6 +805,31 @@ cd frontend && npm run test:e2e:install   # once
 
 ---
 
+## The icon
+
+`frontend/public/favicon.svg` is the source of truth — three staggered lanes on
+a shared axis, in the app's own accents. It was designed at 16px first, because
+that is the size a bookmarks bar actually renders: no fine detail, no lettering,
+just a few thick shapes and strong colour. The stagger is the part that does the
+work, since three left-aligned bars would read as a generic list icon.
+
+Everything else is generated from it, so the two can never drift:
+
+```bash
+cd frontend && npm run icons
+```
+
+That writes `favicon.ico` (16/32/48), `icon-16/32/48/192/512.png` and
+`apple-touch-icon.png`. Rendering goes through the Chromium that Playwright
+already installs, so there is no new image dependency.
+
+> The `.ico` matters more than it looks. Chrome's bookmarks bar is fed from its
+> favicon *database*, not from the live page, and that database falls back to
+> `/favicon.ico`. Before this existed the SPA route answered that request with
+> `200 OK` and a page of HTML — no error anywhere, and no icon.
+
+---
+
 ## Where to change things
 
 | To change... | Edit |

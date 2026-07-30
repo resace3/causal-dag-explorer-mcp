@@ -111,11 +111,22 @@ def _mount_frontend(app: FastAPI) -> None:
     async def _index() -> FileResponse:
         return FileResponse(index)
 
+    root = FRONTEND_DIST.resolve()
+
     @app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     async def _spa(path: str) -> FileResponse:
-        candidate = FRONTEND_DIST / path
-        if path and candidate.is_file():
-            return FileResponse(candidate)
+        """Serve a real build artefact when there is one, else the SPA shell.
+
+        Static files at the build root — favicon.ico, the manifest, the PNG
+        icons — have to win over the shell, or the browser is handed HTML where
+        it asked for an image and quietly shows no icon at all.
+        """
+        if path:
+            candidate = (FRONTEND_DIST / path).resolve()
+            # `path` is user-controlled and may contain "..", so confirm the
+            # resolved file is still inside the build before serving it.
+            if candidate.is_file() and candidate.is_relative_to(root):
+                return FileResponse(candidate)
         return FileResponse(index)
 
 

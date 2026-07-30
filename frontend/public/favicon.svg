@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Yesterday Timeline">
+  <title>Yesterday Timeline</title>
+  <!--
+    Three staggered lanes on a shared axis: the app's whole idea in one mark.
+
+    Designed for 16px first, where a bookmarks bar actually renders it. That
+    ruled out anything with fine detail — no clock hands, no arrows, no
+    lettering. What survives at that size is a few thick shapes and strong
+    colour, so the lanes carry the app's own accents (activity green, heart
+    rate blue, sleep orange) against the navy the page uses for text.
+
+    The stagger is the part that does the work: three left-aligned bars would
+    read as a generic list or menu icon, whereas offset starts and unequal
+    lengths read as events placed along a timeline.
+  -->
+  <rect width="32" height="32" rx="7.5" fill="#0f2744"/>
+  <rect x="5.4" y="6.6" width="13.2" height="5.4" rx="2.7" fill="#22c55e"/>
+  <rect x="9.4" y="13.3" width="17.2" height="5.4" rx="2.7" fill="#3b82f6"/>
+  <rect x="5.4" y="20" width="9.6" height="5.4" rx="2.7" fill="#f97316"/>
+</svg>
