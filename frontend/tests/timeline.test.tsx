@@ -674,6 +674,8 @@ describe('page chrome', () => {
                 eventCount: 12,
                 coverage: 0.9,
                 hasData: true,
+                selected: true,
+                priority: 1,
               },
             ],
           ])
@@ -728,6 +730,8 @@ describe('page chrome', () => {
               capabilities: [],
               detail: null,
               hasData: true,
+              selected: true,
+              priority: 1,
             },
             {
               id: 'garmin',
@@ -738,6 +742,8 @@ describe('page chrome', () => {
               capabilities: ['sleep'],
               detail: null,
               hasData: false,
+              selected: true,
+              priority: 1,
             },
           ],
         }}
@@ -772,6 +778,8 @@ describe('page chrome', () => {
               capabilities: [],
               detail: 'Generated locally',
               hasData: true,
+              selected: true,
+              priority: 1,
             },
             {
               id: 'garmin',
@@ -782,6 +790,8 @@ describe('page chrome', () => {
               capabilities: [],
               detail: 'The provider failed',
               hasData: false,
+              selected: true,
+              priority: 1,
             },
           ],
         }}

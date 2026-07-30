@@ -162,6 +162,10 @@ export interface DataSource {
   entityCount?: number | null;
   /** False when the source answered but had nothing for the displayed day. */
   hasData: boolean;
+  /** False when switched off, in which case it was never contacted. */
+  selected: boolean;
+  /** Position in the merge order; lower wins when two sources share a metric. */
+  priority: number | null;
 }
 
 export interface DataSourceReport {

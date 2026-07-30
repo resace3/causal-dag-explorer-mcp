@@ -20,6 +20,7 @@ from .models import (
     CausalEdgeOverrideRow,
     CustomLaneRow,
     LaneConfigRow,
+    SourceSelectionRow,
     RawRecordRow,
     SyncRunRow,
     TimelineEventRow,
@@ -305,6 +306,26 @@ class Repository:
             session.delete(row)
             session.commit()
             return True
+
+    # -- source selection --------------------------------------------------
+
+    def get_source_selection(self) -> list[str] | None:
+        """The chosen sources, or None when the config's own order applies."""
+        with self.session() as session:
+            row = session.get(SourceSelectionRow, "default")
+            return list(row.sources) if row else None
+
+    def set_source_selection(self, sources: list[str]) -> list[str]:
+        with self.session() as session:
+            session.merge(
+                SourceSelectionRow(
+                    id="default",
+                    sources=list(sources),
+                    updated_at=datetime.now().astimezone(),
+                )
+            )
+            session.commit()
+        return sources
 
     # -- maintenance -----------------------------------------------------
 

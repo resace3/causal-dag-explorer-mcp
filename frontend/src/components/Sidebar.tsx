@@ -4,6 +4,7 @@
  */
 
 import { Calendar } from './Calendar';
+import { SourcePicker } from './SourcePicker';
 import { ClockIcon, HomeIcon, PlugIcon, PulseIcon, WatchIcon } from './Icons';
 import type { DayIndex } from '../api/client';
 import type { DataSource, DataSourceReport, SourceStatus } from '../types/timeline';
@@ -98,10 +99,13 @@ interface SidebarProps {
   dayIndex: Map<string, DayIndex>;
   onSelectDate: (date: string) => void;
   loadingDay?: boolean;
+  /** Fires after the MCP selection changes, so the day is rebuilt from it. */
+  onSourcesChanged?: () => void;
 }
 
 export function Sidebar({
   sources,
+  onSourcesChanged = () => {},
   state = 'ready',
   lastSync,
   selectedDate,
@@ -148,10 +152,11 @@ export function Sidebar({
         />
       ) : null}
 
-      <section className="mt-4 rounded-xl border border-slate-200" aria-label="Data sources">
+      <section className="mt-4 rounded-xl border border-slate-200" aria-label="MCPs">
         <h2 className="border-b border-slate-100 px-3 py-2.5 text-[12.5px] font-semibold text-slate-700">
-          Data Sources
+          MCPs
         </h2>
+        <SourcePicker onChanged={onSourcesChanged} />
         {sources ? (
           <ul className="divide-y divide-slate-100">
             {sources.sources.map((source) => (

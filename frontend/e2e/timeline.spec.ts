@@ -274,8 +274,9 @@ test.describe('Yesterday timeline', () => {
   test('lists every data source as an MCP integration', async ({ page }) => {
     await waitForTimeline(page);
 
-    const panel = page.getByRole('region', { name: 'Data sources' });
+    const panel = page.getByRole('region', { name: 'MCPs' });
     await expect(panel).toBeVisible();
+    await expect(panel.locator('h2')).toHaveText('MCPs');
     await expect(page.getByTestId('source-home_assistant')).toContainText(
       /Connected|Disconnected|Mock data|Error|Syncing/,
     );
@@ -287,6 +288,62 @@ test.describe('Yesterday timeline', () => {
     const rows = panel.locator('[data-testid^="source-"]');
     expect(await rows.count()).toBeGreaterThanOrEqual(2);
     await expect(panel.getByText(/read over (MCP|its REST API)|generated locally|read from a file export/).first()).toBeVisible();
+  });
+
+  test('chooses and reorders which MCPs supply the data', async ({ page }) => {
+    await waitForTimeline(page);
+
+    const before = await page.evaluate(async () =>
+      (await (await fetch('/api/sources/selection')).json()).selected,
+    );
+    test.skip(before.length < 2, 'Needs at least two configured MCPs.');
+
+    await page.getByTestId('source-picker-toggle').click();
+    const popover = page.getByTestId('source-picker-popover');
+    await expect(popover).toBeVisible();
+
+    // Order is the merge priority, so moving one has to change the stored order.
+    await page.getByTestId(`source-up-${before[1]}`).click();
+    await expect
+      .poll(async () =>
+        page.evaluate(async () =>
+          (await (await fetch('/api/sources/selection')).json()).selected.join(','),
+        ),
+      )
+      .toBe([before[1], before[0]].join(','));
+
+    // Switching one off removes it from the selection entirely.
+    await page.getByTestId(`source-toggle-${before[0]}`).click();
+    await expect
+      .poll(async () =>
+        page.evaluate(async () =>
+          (await (await fetch('/api/sources/selection')).json()).selected,
+        ),
+      )
+      .toEqual([before[1]]);
+
+    // A source that was never contacted must not report itself as connected.
+    const off = await page.evaluate(
+      async (id) => {
+        const body = await (await fetch('/api/data-sources')).json();
+        return body.sources.filter((s: { id: string }) => s.id === id);
+      },
+      before[0],
+    );
+    for (const source of off) {
+      expect(source.selected).toBe(false);
+      expect(source.status).toBe('disconnected');
+    }
+
+    await page.evaluate(
+      (selected) =>
+        fetch('/api/sources/selection', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selected }),
+        }),
+      before,
+    );
   });
 
   test('draws lanes on one shared, aligned x-axis', async ({ page }) => {

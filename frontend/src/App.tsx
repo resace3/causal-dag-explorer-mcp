@@ -184,6 +184,7 @@ export function App() {
         dayIndex={dayIndex}
         onSelectDate={setSelectedDate}
         loadingDay={state === 'loading'}
+        onSourcesChanged={() => void refresh()}
       />
 
       <main className="flex min-w-0 flex-1 flex-col" id="timeline">

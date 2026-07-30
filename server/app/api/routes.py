@@ -443,6 +443,33 @@ def _interpret_for(sync: SyncService, prompt: str, day: str | None):
     return interpret(prompt, sync.repository.get_timeline(target)), target
 
 
+@router.get("/sources/selection", summary="Which MCP integrations to read from")
+async def source_selection(sync: SyncDep) -> dict[str, Any]:
+    return {
+        "available": sync.available_sources(),
+        "selected": sync.source_selection(),
+        "default": sync.default_selection(),
+    }
+
+
+@router.put("/sources/selection", summary="Choose which MCP integrations to read from")
+async def set_source_selection(
+    sync: SyncDep,
+    selected: Annotated[list[str], Body(embed=True)],
+) -> dict[str, Any]:
+    """Order matters: it is the priority for merging a metric across sources."""
+    if not selected:
+        raise ApiError(
+            "no_sources_selected",
+            "At least one source has to stay switched on, or there is nothing to read.",
+        )
+    try:
+        chosen = sync.set_source_selection(selected)
+    except ValueError as exc:
+        raise ApiError("unknown_source", str(exc)) from None
+    return {"selected": chosen, "available": sync.available_sources()}
+
+
 @router.post("/rows/interpret", summary="Read a request for a new row, without creating it")
 async def interpret_row(
     sync: SyncDep,

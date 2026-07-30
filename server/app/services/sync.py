@@ -21,6 +21,7 @@ from ..config.settings import Settings, get_settings
 from ..connectors.home_assistant.connector import (
     SOURCE_ID as HA_SOURCE_ID,
     SOURCE_NAME as HA_SOURCE_NAME,
+    ConnectorResult,
     HomeAssistantConnector,
 )
 from ..connectors.wearables.base import WearableProvider
@@ -40,6 +41,35 @@ logger = logging.getLogger(__name__)
 #: How each wearable provider is presented in the Data Sources panel. Every
 #: row names the MCP integration it corresponds to, so the sidebar matches the
 #: servers configured in the user's MCP client.
+#: Every MCP integration the timeline can read from, and how each contributes.
+#: `wearable_route` names the composite route that supplies body metrics;
+#: `home_lanes` marks the source that supplies environment, presence and
+#: location, which only Home Assistant can.
+SOURCE_CATALOGUE = {
+    HA_SOURCE_ID: {
+        "name": HA_SOURCE_NAME,
+        "wearable_route": "home_assistant",
+        "home_lanes": True,
+    },
+    "garmin": {
+        "name": "Garmin",
+        "wearable_route": "garmin_mcp",
+        "home_lanes": False,
+    },
+}
+
+
+#: Which switch in the MCPs panel owns each row the status report can produce.
+#: A row absent from this map is not switchable — a mock provider or a file
+#: export is not an MCP integration, and the selection must leave it alone
+#: rather than reporting it switched off.
+SOURCE_ROW_OWNER = {
+    HA_SOURCE_ID: HA_SOURCE_ID,
+    "wearable_home_assistant": HA_SOURCE_ID,
+    "garmin": "garmin",
+}
+
+
 WEARABLE_SOURCES = {
     "auto": {
         "id": "garmin",
@@ -118,6 +148,70 @@ class SyncService:
     def today(self, *, now: datetime | None = None) -> date_type:
         return (now or datetime.now(self.tz)).astimezone(self.tz).date()
 
+    def available_sources(self) -> list[dict[str, Any]]:
+        """The MCP integrations this configuration could read from."""
+        items: list[dict[str, Any]] = [
+            {
+                "id": HA_SOURCE_ID,
+                "name": HA_SOURCE_NAME,
+                "mcpServer": self.config.home_assistant.mcp_server,
+                "transport": "rest",
+                "provides": ["Body metrics via Home Assistant", "Home, presence and location"],
+            }
+        ]
+        wearable = self.config.wearable
+        if "garmin_mcp" in wearable.routes or wearable.provider == "garmin_mcp":
+            items.append(
+                {
+                    "id": "garmin",
+                    "name": "Garmin",
+                    "mcpServer": wearable.garmin_mcp.mcp_server,
+                    "transport": "mcp",
+                    "provides": ["Sleep, heart rate, HRV, readiness, workouts"],
+                }
+            )
+        return items
+
+    def default_selection(self) -> list[str]:
+        """Config order, so an untouched install behaves exactly as declared."""
+        by_route = {
+            info["wearable_route"]: source_id
+            for source_id, info in SOURCE_CATALOGUE.items()
+        }
+        available = {item["id"] for item in self.available_sources()}
+        ordered = [
+            by_route[route]
+            for route in self.config.wearable.routes
+            if by_route.get(route) in available
+        ]
+        for item in self.available_sources():
+            if item["id"] not in ordered:
+                ordered.append(item["id"])
+        return ordered
+
+    def source_selection(self) -> list[str]:
+        """Chosen sources in priority order, filtered to those still available."""
+        available = [item["id"] for item in self.available_sources()]
+        stored = self.repository.get_source_selection()
+        if stored is None:
+            return self.default_selection()
+        # A source removed from config must not linger in a stored selection.
+        return [source_id for source_id in stored if source_id in available]
+
+    def set_source_selection(self, sources: list[str]) -> list[str]:
+        available = [item["id"] for item in self.available_sources()]
+        unknown = [source_id for source_id in sources if source_id not in available]
+        if unknown:
+            raise ValueError(
+                f"Unknown source(s): {', '.join(unknown)}. "
+                f"Available: {', '.join(available)}."
+            )
+        chosen = self.repository.set_source_selection(sources)
+        # The provider is cached per process, so it has to be rebuilt for the
+        # next fetch to actually use the new routes.
+        self._reset_provider()
+        return chosen
+
     def _wearable_provider(self) -> WearableProvider:
         """One provider instance per process.
 
@@ -127,13 +221,38 @@ class SyncService:
         poll and make the panel hang.
         """
         if self._provider is None:
-            self._provider = build_provider(self.config, self.settings, self.tz)
+            self._provider = build_provider(
+                self._configured_for_selection(), self.settings, self.tz
+            )
         return self._provider
+
+    def _configured_for_selection(self) -> AppConfig:
+        """The configuration with the chosen sources applied to wearable routes.
+
+        Mock mode ignores this entirely — `build_provider` forces the mock
+        provider — which is what keeps a demo install predictable.
+        """
+        selection = self.source_selection()
+        routes = [
+            SOURCE_CATALOGUE[source_id]["wearable_route"]
+            for source_id in selection
+            if source_id in SOURCE_CATALOGUE
+        ]
+        if not routes or routes == list(self.config.wearable.routes):
+            return self.config
+
+        adjusted = self.config.model_copy(deep=True)
+        adjusted.wearable.provider = "auto"
+        adjusted.wearable.routes = routes
+        return adjusted
 
     def _reset_provider(self) -> None:
         """Drop cached provider state so the next fetch really re-reads."""
         self._provider = None
         self._capabilities = None
+
+    def home_assistant_selected(self) -> bool:
+        return HA_SOURCE_ID in self.source_selection()
 
     def _connectors(self) -> tuple[HomeAssistantConnector, WearableConnector]:
         home_assistant = HomeAssistantConnector(
@@ -146,7 +265,12 @@ class SyncService:
     async def data_sources(self) -> DataSourceReport:
         """Report one row per MCP integration the timeline reads from."""
         home_assistant, wearable = self._connectors()
-        ha_status, ha_detail = await home_assistant.check_status()
+        selection = self.source_selection()
+        if HA_SOURCE_ID in selection:
+            ha_status, ha_detail = await home_assistant.check_status()
+        else:
+            # Never contact a source the user switched off, not even to probe it.
+            ha_status, ha_detail = "disconnected", "Switched off in the MCPs panel."
 
         last_run = self.repository.last_sync()
         last_sync = last_run.completed_at if last_run else None
@@ -168,6 +292,26 @@ class SyncService:
             await self._wearable_source(wearable, last_sync, cached),
         ]
 
+        # Mark each row with whether it is switched on and where it sits in the
+        # merge order, so the panel shows the arrangement rather than only the
+        # connection state.
+        for source in sources:
+            # A row is a *view* of an MCP, and one MCP can produce two rows:
+            # Home Assistant supplies the home lanes and, when Garmin is off,
+            # the body metrics too. Both belong to the same switch.
+            owner = SOURCE_ROW_OWNER.get(source.id)
+            if owner is None:
+                continue  # not switchable, so the selection does not apply
+            source.selected = owner in selection
+            source.priority = selection.index(owner) + 1 if owner in selection else None
+            if not source.selected:
+                # Nothing was attempted, so any status or detail carried over
+                # from the provider would describe a connection never made.
+                source.status = "disconnected"
+                source.detail = "Switched off in the MCPs panel."
+                source.capabilities = []
+                source.has_data = False
+
         return DataSourceReport(
             sources=sources,
             mock_data=self.settings.use_mock_data,
@@ -177,6 +321,11 @@ class SyncService:
     async def _wearable_source(self, wearable, last_sync, cached) -> DataSource:
         """The wearable row is named after the MCP server behind it."""
         provider_name = getattr(wearable.provider, "name", "unknown")
+        # A composite is named after whichever route leads it, so the row does
+        # not claim to be Garmin when Garmin is switched off.
+        routes = getattr(wearable.provider, "providers", None)
+        if provider_name == "auto" and routes:
+            provider_name = routes[0][0]
         descriptor = WEARABLE_SOURCES.get(provider_name, WEARABLE_SOURCES["mock"])
         mcp_server = descriptor["mcp_server"]
         if provider_name == "garmin_mcp":
@@ -282,10 +431,21 @@ class SyncService:
         fetch_end = window.end + LOOKAHEAD
 
         home_assistant, wearable = self._connectors()
-        ha_result, wearable_payload = await asyncio.gather(
-            home_assistant.fetch(fetch_start, fetch_end),
-            wearable.fetch(fetch_start, fetch_end),
-        )
+        if self.home_assistant_selected():
+            ha_result, wearable_payload = await asyncio.gather(
+                home_assistant.fetch(fetch_start, fetch_end),
+                wearable.fetch(fetch_start, fetch_end),
+            )
+        else:
+            # Switched off in the MCPs panel. Not contacting it is the whole
+            # point, so the day is reconstructed from the rest and the home
+            # lanes say they were switched off rather than that they failed.
+            ha_result = ConnectorResult(
+                status="disconnected",
+                detail="Switched off in the MCPs panel.",
+                warnings=["Home Assistant is switched off, so its lanes are empty."],
+            )
+            wearable_payload = await wearable.fetch(fetch_start, fetch_end)
 
         warnings = list(ha_result.warnings) + list(wearable_payload.warnings)
         errors = list(ha_result.errors) + list(wearable_payload.errors)

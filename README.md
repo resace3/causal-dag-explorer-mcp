@@ -114,9 +114,9 @@ you have never arranged joins at the bottom rather than jumping to the top.
 
 ### Data sources are MCP servers
 
-Every row in the Data Sources panel is an MCP integration you configured — not
-an internal abstraction. Each row names the server and states how it is reached,
-so the route is never implied:
+Every row in the **MCPs** panel is an MCP integration you configured — not an
+internal abstraction. Each row names the server and states how it is reached, so
+the route is never implied:
 
 | Row | MCP server | How it is read |
 | --- | --- | --- |
@@ -126,6 +126,27 @@ so the route is never implied:
 Leave `command` unset under `mcp.servers` and the timeline reuses the server
 definition already in your MCP client's configuration, so credentials live in
 one place.
+
+**Reading from** in that panel chooses which of them to use, and in what order.
+It is a ranked list rather than a set of checkboxes because the order is the
+merge priority: when two sources both offer a metric, the one higher in the list
+supplies it. Metrics are never blended, so a heart-rate line always comes from a
+single device rather than being stitched together from two.
+
+Two consequences worth knowing:
+
+- **A source switched off is not contacted at all** — not even probed for
+  status. The panel says "switched off" rather than reporting a connection that
+  was never attempted, and switching Home Assistant off leaves its lanes empty
+  with that as the stated reason.
+- **The selection is stored, not written back to `config.yaml`.** That file
+  stays the declared baseline, so clearing the selection returns the app to
+  exactly what the configuration says. A source you later remove from the config
+  is dropped from a stored selection rather than lingering in it.
+
+Mock mode ignores the picker entirely — `USE_MOCK_DATA` forces the mock
+provider, and a mock row is never reported as switched off by a switch that does
+not govern it.
 
 **Only read-only tools are ever called.** The Garmin MCP also exposes tools that
 create workouts and delete courses; `app/connectors/mcp_client.py` enforces an

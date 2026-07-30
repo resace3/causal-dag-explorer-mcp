@@ -106,4 +106,19 @@ class CustomLaneRow(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
 
 
+class SourceSelectionRow(SQLModel, table=True):
+    """Which MCP integrations to read from, in priority order.
+
+    Stored rather than written back into config.yaml so the file stays the
+    declared baseline: clearing this row returns the app to exactly what the
+    configuration says.
+    """
+
+    __tablename__ = "source_selection"
+
+    id: str = Field(default="default", primary_key=True)
+    sources: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+
+
 Index("ix_raw_records_day_stream", RawRecordRow.day, RawRecordRow.stream)

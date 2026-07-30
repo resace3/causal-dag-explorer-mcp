@@ -43,6 +43,14 @@ class DataSource(CamelModel):
     has_data: bool = True
     """False when the source answered but had nothing for the displayed day."""
 
+    selected: bool = True
+    """False when the user switched this source off. A deselected source is
+    never contacted, so its status is not a report of any attempt."""
+
+    priority: int | None = None
+    """Where this source sits in the merge order. When two sources both offer a
+    metric the lower number supplies it; metrics are never blended."""
+
 
 class DataSourceReport(CamelModel):
     sources: list[DataSource] = Field(default_factory=list)

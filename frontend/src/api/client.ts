@@ -153,6 +153,21 @@ export interface RowInterpretation {
   known: string[];
 }
 
+/** One MCP integration the timeline can read from. */
+export interface SourceOption {
+  id: string;
+  name: string;
+  mcpServer: string | null;
+  transport: string;
+  provides: string[];
+}
+
+export interface SourceSelectionResponse {
+  available: SourceOption[];
+  selected: string[];
+  default: string[];
+}
+
 export interface CustomRow {
   id: string;
   label: string;
@@ -264,6 +279,12 @@ export const api = {
     ),
   dag: (body: { outcome: string; exposure: string | null; day: string | null }) =>
     request<DagResponse>('/api/dag', { method: 'POST', body: JSON.stringify(body) }),
+  sourceSelection: () => request<SourceSelectionResponse>('/api/sources/selection'),
+  setSourceSelection: (selected: string[]) =>
+    request<{ selected: string[]; available: SourceOption[] }>('/api/sources/selection', {
+      method: 'PUT',
+      body: JSON.stringify({ selected }),
+    }),
   interpretRow: (prompt: string, day: string | null) =>
     request<RowInterpretation>('/api/rows/interpret', {
       method: 'POST',
