@@ -113,6 +113,52 @@ async def test_a_stored_day_is_served_from_cache(sync_service):
     assert again.generated_at == first.generated_at
 
 
+async def test_a_day_synced_before_it_ended_is_refetched(sync_service, repository):
+    """The snapshot of a day taken while it was still today is incomplete.
+
+    Serving it forever is what makes the morning after show a day that stops at
+    breakfast, so a stale partial has to be re-fetched rather than cached.
+    """
+    day = sync_service.today() - timedelta(days=3)
+    window = sync_service.window_for(day)
+    partial = await sync_service.sync(force_refresh=True, day=day)
+
+    # Rewrite history: pretend this was captured at midday, mid-day.
+    stored = repository.get_timeline(day)
+    stored.generated_at = window.start + timedelta(hours=12)
+    repository.save_timeline(stored)
+    assert repository.get_timeline(day).generated_at < window.end
+
+    refreshed = await sync_service.get_or_sync(day=day)
+    assert refreshed.generated_at > partial.generated_at, (
+        "a day captured before it ended must be re-fetched, not served from cache"
+    )
+    assert refreshed.generated_at >= window.end
+
+
+async def test_a_complete_day_is_not_refetched_needlessly(sync_service):
+    """The guard must not turn every cache hit into a network call."""
+    day = sync_service.today() - timedelta(days=4)
+    first = await sync_service.sync(force_refresh=True, day=day)
+    for _ in range(3):
+        again = await sync_service.get_or_sync(day=day)
+        assert again.generated_at == first.generated_at
+
+
+async def test_today_stays_cached_while_it_is_still_running(sync_service):
+    """Today is always a partial snapshot, and must not re-sync on every poll.
+
+    The page polls once a minute and a wearable fetch can spawn an MCP
+    subprocess, so treating an in-progress day as stale would hammer the
+    sources. Refresh is the way to ask for today's latest hours.
+    """
+    today = sync_service.today()
+    first = await sync_service.sync(force_refresh=True, day=today)
+    for _ in range(3):
+        again = await sync_service.get_or_sync(day=today)
+        assert again.generated_at == first.generated_at
+
+
 async def test_available_days_counts_only_processed_days(sync_service):
     day = sync_service.today() - timedelta(days=7)
     await sync_service.sync(force_refresh=True, day=day)

@@ -378,9 +378,33 @@ class SyncService:
     ) -> DayTimeline:
         window = self.window_for(day) if day is not None else self.yesterday(now=now)
         cached = self.repository.get_timeline(window.day)
-        if cached is not None:
+        if cached is not None and not self._is_stale_partial(cached, window, now=now):
             return cached
-        return await self.sync(now=now, day=window.day)
+        return await self.sync(force_refresh=cached is not None, now=now, day=window.day)
+
+    def _is_stale_partial(
+        self, timeline: DayTimeline, window: DayWindow, *, now: datetime | None = None
+    ) -> bool:
+        """True when a *finished* day is being served from a mid-day snapshot.
+
+        A day synced while it was still in progress only holds the hours that
+        had happened by then. Left alone that snapshot is served forever, so the
+        morning after shows a day that stops at breakfast.
+
+        The check deliberately only fires once the day is over. Re-fetching a
+        day that is *still* in progress would be defensible on freshness
+        grounds, but the page polls every minute and a Garmin fetch spawns and
+        authenticates an MCP subprocess — so today stays cached, and the Refresh
+        control is how you ask for its latest hours.
+        """
+        moment = (now or datetime.now(self.tz)).astimezone(self.tz)
+        if moment < window.end:
+            return False  # the day is still running; nothing is missing yet
+
+        generated = timeline.generated_at
+        if generated.tzinfo is None:  # pragma: no cover - defensive
+            generated = generated.replace(tzinfo=window.end.tzinfo)
+        return generated < window.end
 
     def available_days(self, *, span_days: int = 45, now: datetime | None = None) -> list[dict]:
         """Which days the calendar can offer, and which already hold data.

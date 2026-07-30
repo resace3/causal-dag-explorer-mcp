@@ -59,6 +59,7 @@ day could not place are listed rather than dropped.
 - [MCP client configuration](#mcp-client-configuration)
 - [MCP tools](#mcp-tools)
 - [Environment variables](#environment-variables)
+- [Starting it automatically at login](#starting-it-automatically-at-login)
 - [Developer commands](#developer-commands)
 - [Testing](#testing)
 - [Where to change things](#where-to-change-things)
@@ -637,6 +638,67 @@ empty day.
 | `FRONTEND_PORT` | `3000` | Vite dev server port |
 | `DATA_DIR` | `./data` | Where the SQLite file lives |
 | `CONFIG_PATH` | *(auto)* | `config.yaml`, falling back to `config.example.yaml` |
+
+---
+
+## Starting it automatically at login
+
+One command registers a Windows Scheduled Task that starts the server, pulls
+yesterday, and opens the page every time you sign in:
+
+```powershell
+.\scripts\install_autostart.ps1
+```
+
+```powershell
+.\scripts\install_autostart.ps1 -Status
+```
+
+```powershell
+.\scripts\install_autostart.ps1 -Uninstall
+```
+
+It runs as your user at your login, 30 seconds after sign-in
+(`-DelaySeconds` changes that), with no elevation and no console window. The
+task waits for a network connection first, because Home Assistant is reached
+over one — a machine that signs in before Wi-Fi associates would otherwise
+record a failed fetch.
+
+| Script | What it does |
+| --- | --- |
+| `scripts/install_autostart.ps1` | Registers, inspects or removes the login task |
+| `scripts/start_on_login.ps1` | What the task runs: start, pre-fetch, open. Safe to run by hand |
+| `scripts/stop.ps1` | Stops the server |
+
+`start_on_login.ps1` is idempotent — if something already answers on port 8000
+it reuses it rather than starting a second server. A failed fetch is logged and
+the page still opens; a source that was down is not a reason to show nothing.
+
+Progress goes to `logs/startup.log`, one block per login:
+
+```
+2026-07-30 10:22:26  --- login trigger ---
+2026-07-30 10:22:39  Server is up.
+2026-07-30 10:22:40  Ready: 2026-07-29 - 18 events, 85% coverage, 1225 raw records.
+```
+
+`scripts/stop.ps1` finds the server by **who owns the port**, not by process
+name. A `uv`-created virtualenv has a trampoline `python.exe` that re-execs the
+real interpreter, so the process actually holding port 8000 is a child of the
+one the launcher started — stopping the parent alone would leave the server
+running.
+
+### Days synced while they were still running
+
+Opening the page on a day still in progress caches a partial snapshot of it.
+Once that day ends, the snapshot is no longer a valid answer, so `get_or_sync`
+compares each cached day's generation time against the day's own end and
+re-fetches anything captured early.
+
+The check deliberately fires only *after* a day is over. Today always looks
+partial by that definition, and the page polls every minute — re-fetching on
+each poll would spawn and authenticate a Garmin MCP subprocess every time.
+Today stays cached; **Refresh** is how you ask for its latest hours.
 
 ---
 

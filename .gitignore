@@ -6,6 +6,9 @@ config.yaml
 data/
 *.sqlite3
 
+# Autostart logs (contain day summaries, not credentials).
+logs/
+
 # Python
 server/.venv/
 __pycache__/
