@@ -230,6 +230,11 @@ export function laneAriaLabel(lane: Lane): string {
 
 export function eventTooltip(event: TimelineEvent, timeZone: string): string {
   const lines = [event.label, formatTimeRange(event.startTime, event.endTime, timeZone)];
+  // The times above are this day's slice of the period. Saying so stops a
+  // sleep cut at midnight from reading as one that genuinely ended there.
+  if (event.continuesBefore && event.continuesAfter) lines.push('Runs through the whole day');
+  else if (event.continuesBefore) lines.push('Began the previous day');
+  else if (event.continuesAfter) lines.push('Continues into the next day');
   if (event.value != null) lines.push(`${event.value}${event.unit ? ` ${event.unit}` : ''}`);
   lines.push(event.measuredOrDerived === 'derived' ? 'Derived feature' : 'Measured');
   return lines.join('\n');

@@ -141,6 +141,12 @@ controls shape it:
   what followed to its right. The forward end stops at today, since a day that
   has not happened holds no data and cannot be reconstructed.
 
+A period that crosses midnight — a night's sleep, usually — is stored once per
+day it touches, each copy cut at the boundary. The two halves are drawn running
+to their panel edges so they meet as one unbroken bar, and the night is
+announced once, on the day it began, labelled with its real span rather than the
+half that ends at midnight.
+
 Each day is drawn as its own panel with its own scale rather than laid on one
 continuous ruler. A day is 23 or 25 hours across a daylight-saving change, so a
 single linear ruler would either misplace the boundaries or silently stretch one

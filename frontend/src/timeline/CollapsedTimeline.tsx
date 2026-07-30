@@ -190,10 +190,11 @@ export function CollapsedTimeline({
           data-testid="collapsed-scroller"
         >
           <div className="flex" style={{ width: dayWidth * days.length }}>
-            {days.map((day) => (
+            {days.map((day, index) => (
               <DayStrip
                 key={day.date}
                 day={day}
+                isFirstPanel={index === 0}
                 width={dayWidth}
                 hidden={hidden}
                 selectedKey={selectedKey}
@@ -217,9 +218,11 @@ function DayStrip({
   selectedKey,
   onSelect,
   onLoadDay,
+  isFirstPanel,
 }: {
   day: RangeDay;
   width: number;
+  isFirstPanel: boolean;
   hidden: Set<string>;
   selectedKey: string | null;
   onSelect: (selection: Selection) => void;
@@ -271,6 +274,7 @@ function DayStrip({
           hidden={hidden}
           selectedKey={selectedKey}
           onSelect={onSelect}
+          isFirstPanel={isFirstPanel}
         />
       ) : (
         <PlaceholderDay day={day} onLoadDay={onLoadDay} />
@@ -320,18 +324,37 @@ function PlaceholderDay({
   );
 }
 
+/**
+ * The event's real extent, ignoring the midnight clipping.
+ *
+ * A period that crosses midnight is stored once per day it touches, each copy
+ * cut at the boundary. The feature-engineering rules keep the true span in
+ * `fullStart`/`fullEnd` precisely so a label can say "8:32 PM – 12:26 AM"
+ * rather than the clipped "8:32 PM – 12:00 AM", which describes an awakening
+ * that never happened.
+ */
+export function trueSpan(event: TimelineEvent): { start: string; end?: string | null } {
+  const meta = event.metadata ?? {};
+  const start = typeof meta.fullStart === 'string' ? meta.fullStart : event.startTime;
+  const end = typeof meta.fullEnd === 'string' ? meta.fullEnd : event.endTime;
+  return { start, end };
+}
+
 function LoadedDay({
   timeline,
   width,
   hidden,
   selectedKey,
   onSelect,
+  isFirstPanel,
 }: {
   timeline: DayTimeline;
   width: number;
   hidden: Set<string>;
   selectedKey: string | null;
   onSelect: (selection: Selection) => void;
+  /** No earlier panel exists, so a continuation here has nothing to defer to. */
+  isFirstPanel: boolean;
 }) {
   const scale = useMemo(
     () => createScale(timeline.dayStart, timeline.dayEnd, width, timeline.localTimezone),
@@ -339,6 +362,38 @@ function LoadedDay({
   );
 
   const items = useMemo(() => majorEvents(timeline.lanes, hidden), [timeline.lanes, hidden]);
+
+  /**
+   * Geometry per event, with two rules for periods cut at midnight.
+   *
+   * The bar runs to the panel's own edge rather than to the scale position of
+   * midnight. The scale insets both ends by `PAD_LEFT`/`PAD_RIGHT` so the hour
+   * labels are not clipped, which would otherwise leave a visible gap between
+   * the two halves of one unbroken night's sleep.
+   *
+   * The node and label belong to the half where the period actually began, so
+   * one sleep is announced once. The continuation carries only its bar — unless
+   * this is the leftmost panel, where the opening half is not rendered at all
+   * and suppressing it would lose the event entirely.
+   */
+  const geometry = useMemo(
+    () =>
+      items.map(({ event }) => {
+        const startX = event.continuesBefore ? 0 : scale.x(event.startTime);
+        const endX = event.continuesAfter
+          ? width
+          : event.endTime
+            ? scale.x(event.endTime)
+            : scale.x(event.startTime);
+        return {
+          startX,
+          endX,
+          nodeX: (startX + endX) / 2,
+          announced: !event.continuesBefore || isFirstPanel,
+        };
+      }),
+    [items, scale, width, isFirstPanel],
+  );
 
   /**
    * Place each label on the first row — alternating above and below the
@@ -350,15 +405,17 @@ function LoadedDay({
     const rowsAbove: [number, number][][] = [[], []];
     const rowsBelow: [number, number][][] = [[], []];
 
-    return items.map(({ event }) => {
-      const startX = scale.x(event.startTime);
-      const endX = event.endTime ? scale.x(event.endTime) : startX;
-      const centre = (startX + endX) / 2;
+    return items.map(({ event }, index) => {
+      // A continuation reserves no room: it is drawn as bar only.
+      if (!geometry[index].announced) return { visible: false, above: true, tier: 0 };
+
+      const centre = geometry[index].nodeX;
+      const span = trueSpan(event);
       const labelWidth =
         Math.max(
           approximateTextWidth(event.label, 11.5),
           approximateTextWidth(
-            formatTimeRange(event.startTime, event.endTime, timeline.localTimezone),
+            formatTimeRange(span.start, span.end, timeline.localTimezone),
             10,
           ),
         ) + 12;
@@ -381,7 +438,7 @@ function LoadedDay({
       }
       return { visible: false, above: true, tier: 0 };
     });
-  }, [items, scale, timeline.localTimezone]);
+  }, [items, geometry, timeline.localTimezone]);
 
   return (
     <div style={{ width }}>
@@ -404,13 +461,15 @@ function LoadedDay({
 
         {items.map(({ event, lane }, index) => {
           const theme = accentTheme(lane.accent);
-          const startX = scale.x(event.startTime);
-          const endX = event.endTime ? scale.x(event.endTime) : startX;
-          const nodeX = (startX + endX) / 2;
+          const { startX, endX, nodeX, announced } = geometry[index];
           const key = `event:${event.id}`;
           const selected = selectedKey === key;
           const { visible, above, tier } = placements[index];
           const labelY = above ? BASELINE - 34 - tier * 32 : BASELINE + 44 + tier * 32;
+
+          // Square off the cut end so the two halves of one period read as a
+          // single unbroken bar across the join rather than two capsules.
+          const radius = event.continuesBefore || event.continuesAfter ? 0 : 4;
 
           return (
             <Mark
@@ -427,26 +486,30 @@ function LoadedDay({
                   y={BASELINE - 4}
                   width={Math.max(endX - startX, 3)}
                   height={8}
-                  rx={4}
+                  rx={radius}
                   fill={theme.fill}
                   opacity={0.85}
                 />
               ) : null}
-              <circle
-                cx={nodeX}
-                cy={BASELINE}
-                r={selected ? 13 : 11}
-                fill="#ffffff"
-                stroke={selected ? theme.stroke : theme.fill}
-                strokeWidth={selected ? 2.4 : 1.6}
-              />
-              <g
-                transform={`translate(${nodeX - 7}, ${BASELINE - 7})`}
-                color={theme.stroke}
-                pointerEvents="none"
-              >
-                <LaneIcon laneId={lane.id} size={14} strokeWidth={1.8} />
-              </g>
+              {announced ? (
+                <>
+                  <circle
+                    cx={nodeX}
+                    cy={BASELINE}
+                    r={selected ? 13 : 11}
+                    fill="#ffffff"
+                    stroke={selected ? theme.stroke : theme.fill}
+                    strokeWidth={selected ? 2.4 : 1.6}
+                  />
+                  <g
+                    transform={`translate(${nodeX - 7}, ${BASELINE - 7})`}
+                    color={theme.stroke}
+                    pointerEvents="none"
+                  >
+                    <LaneIcon laneId={lane.id} size={14} strokeWidth={1.8} />
+                  </g>
+                </>
+              ) : null}
               {visible ? (
                 <g pointerEvents="none">
                   <line
@@ -468,7 +531,12 @@ function LoadedDay({
                     {event.label}
                   </text>
                   <text x={nodeX} y={labelY + 13} textAnchor="middle" fontSize={10} fill="#64748b">
-                    {formatTimeRange(event.startTime, event.endTime, timeline.localTimezone)}
+                    {/* The real span, not the half cut off at midnight. */}
+                    {formatTimeRange(
+                      trueSpan(event).start,
+                      trueSpan(event).end,
+                      timeline.localTimezone,
+                    )}
                   </text>
                 </g>
               ) : null}

@@ -276,6 +276,149 @@ describe('collapsed timeline', () => {
     expect(onLoadDay).toHaveBeenCalledWith('2026-07-01');
   });
 
+  describe('a period that crosses midnight', () => {
+    /**
+     * One night's sleep is stored once per day it touches, each copy cut at the
+     * boundary. Drawn naively that is two capsules with a gap between them,
+     * describing an awakening that never happened.
+     */
+    const nightAcrossMidnight = () => {
+      const evening = makeTimeline({
+        date: '2025-06-10',
+        lanes: [
+          makeLane({
+            id: 'sleep',
+            phenotype: 'sleep',
+            label: 'Sleep',
+            accent: 'orange',
+            events: [
+              makeEvent({
+                id: 'sleep_evening',
+                label: 'Main sleep',
+                category: 'main_sleep',
+                startTime: '2025-06-10T20:32:00-04:00',
+                endTime: '2025-06-11T00:00:00-04:00',
+                continuesAfter: true,
+                metadata: {
+                  fullStart: '2025-06-10T20:32:00-04:00',
+                  fullEnd: '2025-06-11T04:26:00-04:00',
+                },
+              }),
+            ],
+            series: [],
+          }),
+        ],
+      });
+      const morning = makeTimeline({
+        date: '2025-06-11',
+        dayStart: '2025-06-11T00:00:00-04:00',
+        dayEnd: '2025-06-12T00:00:00-04:00',
+        lanes: [
+          makeLane({
+            id: 'sleep',
+            phenotype: 'sleep',
+            label: 'Sleep',
+            accent: 'orange',
+            events: [
+              makeEvent({
+                id: 'sleep_morning',
+                label: 'Main sleep',
+                category: 'main_sleep',
+                startTime: '2025-06-11T00:00:00-04:00',
+                endTime: '2025-06-11T04:26:00-04:00',
+                continuesBefore: true,
+                metadata: {
+                  fullStart: '2025-06-10T20:32:00-04:00',
+                  fullEnd: '2025-06-11T04:26:00-04:00',
+                },
+              }),
+            ],
+            series: [],
+          }),
+        ],
+      });
+      return [
+        { date: '2025-06-10', timeline: evening, status: 'loaded' as const, stored: true },
+        { date: '2025-06-11', timeline: morning, status: 'loaded' as const, stored: true },
+      ];
+    };
+
+    const renderNight = () =>
+      render(
+        <CollapsedTimeline
+          days={nightAcrossMidnight()}
+          focusDate="2025-06-11"
+          hidden={new Set()}
+          onTogglePhenotype={vi.fn()}
+          selectedKey={null}
+          onSelect={vi.fn()}
+          zoom={1}
+          onLoadDay={vi.fn()}
+        />,
+      );
+
+    const bar = (panelDate: string) =>
+      screen.getByTestId(`collapsed-day-${panelDate}`).querySelector('rect[rx]') as SVGRectElement;
+
+    it('runs each half to its panel edge so the two meet', () => {
+      renderNight();
+      const evening = bar('2025-06-10');
+      const morning = bar('2025-06-11');
+      const panelWidth = Number(
+        screen
+          .getByTestId('collapsed-day-2025-06-10')
+          .querySelector('svg')
+          ?.getAttribute('width'),
+      );
+
+      // The evening half reaches the right edge, the morning half starts at the
+      // left edge. The axis inset would otherwise leave a gap at the join.
+      const eveningEnd = Number(evening.getAttribute('x')) + Number(evening.getAttribute('width'));
+      expect(eveningEnd).toBeCloseTo(panelWidth, 0);
+      expect(Number(morning.getAttribute('x'))).toBe(0);
+    });
+
+    it('squares off the cut ends rather than rounding them', () => {
+      renderNight();
+      expect(bar('2025-06-10').getAttribute('rx')).toBe('0');
+      expect(bar('2025-06-11').getAttribute('rx')).toBe('0');
+    });
+
+    it('announces the night once, on the day it began', () => {
+      renderNight();
+      // Two bars, but only one labelled node: the continuation carries no node.
+      expect(screen.getAllByText('Main sleep')).toHaveLength(1);
+    });
+
+    it('labels it with the real span, not the half cut off at midnight', () => {
+      const { container } = renderNight();
+      expect(screen.getByText('8:32 PM – 4:26 AM')).toBeInTheDocument();
+
+      // No drawn label may show the clipped midnight boundary as an end time.
+      // (The hover tooltip still reports this day's slice, and says so.)
+      const drawn = [...container.querySelectorAll('svg text')].map((node) => node.textContent);
+      expect(drawn.some((text) => text?.includes('12:00 AM'))).toBe(false);
+    });
+
+    it('still announces a continuation when no earlier panel exists', () => {
+      // Scrolled to the very start of the window, the opening half is not
+      // rendered at all, so suppressing the label would lose the event.
+      render(
+        <CollapsedTimeline
+          days={nightAcrossMidnight().slice(1)}
+          focusDate="2025-06-11"
+          hidden={new Set()}
+          onTogglePhenotype={vi.fn()}
+          selectedKey={null}
+          onSelect={vi.fn()}
+          zoom={1}
+          onLoadDay={vi.fn()}
+        />,
+      );
+      expect(screen.getByText('Main sleep')).toBeInTheDocument();
+    });
+  });
+
   it('shows one panel per day so day boundaries stay explicit', () => {
     const timeline = makeTimeline();
     render(
