@@ -64,6 +64,8 @@ export function togglablePhenotypes(days: RangeDay[]): Lane[] {
 
 interface CollapsedTimelineProps {
   days: RangeDay[];
+  /** The day the window is centred on, scrolled to on arrival. */
+  focusDate: string | null;
   hidden: Set<string>;
   onTogglePhenotype: (laneId: string) => void;
   selectedKey: string | null;
@@ -74,6 +76,7 @@ interface CollapsedTimelineProps {
 
 export function CollapsedTimeline({
   days,
+  focusDate,
   hidden,
   onTogglePhenotype,
   selectedKey,
@@ -84,17 +87,23 @@ export function CollapsedTimeline({
   const { ref, width } = useElementWidth<HTMLDivElement>(900);
   const scroller = useRef<HTMLDivElement | null>(null);
   const dayWidth = Math.max(MIN_DAY_WIDTH, width / Math.max(1, days.length)) * zoom;
-  const lastDate = days.at(-1)?.date;
+  const focusIndex = days.findIndex((day) => day.date === focusDate);
+  const centred = useRef<string | null>(null);
 
   /**
-   * The selected day is the rightmost panel, with history to its left. Widening
-   * the window would otherwise scroll it out of view and look like the day had
-   * been lost, so the scroller starts at the right-hand end.
+   * Put the chosen day in the middle, with history to its left and what came
+   * after to its right. Only on arrival or when the day changes — re-centring
+   * as panels load would yank the view out from under someone scrolling.
    */
   useEffect(() => {
     const node = scroller.current;
-    if (node) node.scrollLeft = node.scrollWidth;
-  }, [lastDate, days.length, dayWidth]);
+    if (!node || focusIndex < 0 || centred.current === focusDate) return;
+    node.scrollLeft = Math.max(
+      0,
+      focusIndex * dayWidth - (node.clientWidth - dayWidth) / 2,
+    );
+    centred.current = focusDate;
+  }, [focusDate, focusIndex, dayWidth]);
 
   const phenotypes = useMemo(() => togglablePhenotypes(days), [days]);
   const total = useMemo(
@@ -105,6 +114,7 @@ export function CollapsedTimeline({
       ),
     [days, hidden],
   );
+  const loaded = days.filter((day) => day.status === 'loaded').length;
 
   return (
     <div data-testid="timeline-collapsed">
@@ -158,8 +168,14 @@ export function CollapsedTimeline({
               </span>
               <span className="mt-0.5 block text-[11.5px] leading-tight text-slate-500">
                 {total} observable event{total === 1 ? '' : 's'}
-                {days.length > 1 ? ` across ${days.length} days` : ''}
               </span>
+              {days.length > 1 ? (
+                // Counting events "across 61 days" would overstate it when only
+                // a handful of those days have actually been reconstructed.
+                <span className="mt-0.5 block text-[11px] leading-tight text-slate-400">
+                  {loaded} of {days.length} days loaded
+                </span>
+              ) : null}
             </span>
           </div>
           <div style={{ height: AXIS_HEIGHT }} />
@@ -210,9 +226,34 @@ function DayStrip({
   onLoadDay: (date: string) => void;
 }) {
   const timeline = day.timeline;
+  const panel = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Fetch a already-processed day when its panel nears the viewport. The window
+   * is two months wide, so loading every stored day up front would mean dozens
+   * of requests for panels nobody has scrolled to. Days the server has *not*
+   * processed are never pulled in this way — that stays a deliberate click.
+   */
+  const needsLoad = day.stored && day.status === 'unfetched';
+  useEffect(() => {
+    const node = panel.current;
+    if (!node || !needsLoad || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          onLoadDay(day.date);
+          observer.disconnect();
+        }
+      },
+      { root: null, rootMargin: '0px 600px' }, // a panel ahead, so it is ready on arrival
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [needsLoad, day.date, onLoadDay]);
 
   return (
     <div
+      ref={panel}
       className="shrink-0 border-l border-slate-200 first:border-l-0"
       style={{ width }}
       data-testid={`collapsed-day-${day.date}`}
@@ -251,9 +292,12 @@ function PlaceholderDay({
       style={{ height: HEIGHT + AXIS_HEIGHT * 2 }}
     >
       {day.status === 'loading' ? (
-        <p className="text-[12px] text-slate-400">Reconstructing {day.date}…</p>
+        <p className="text-[12px] text-slate-400">Loading {day.date}…</p>
       ) : day.status === 'error' ? (
         <p className="text-[12px] leading-relaxed text-rose-600">{day.error}</p>
+      ) : day.stored ? (
+        // Already processed, so it loads itself the moment it scrolls into view.
+        <p className="text-[12px] text-slate-300">…</p>
       ) : (
         <>
           <p className="text-[12px] leading-relaxed text-slate-400">

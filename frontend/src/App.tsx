@@ -5,7 +5,7 @@ import { Sidebar } from './components/Sidebar';
 import { ErrorState, SourceNotices, TimelineSkeleton } from './components/States';
 import { TimelineControls, type ViewMode } from './components/TimelineControls';
 import { useDataSources } from './hooks/useDataSources';
-import { datesEndingAt, useDayRange } from './hooks/useDayRange';
+import { datesAround, useDayRange } from './hooks/useDayRange';
 import { isStringArray, usePersistentState } from './hooks/usePersistentState';
 import { applyLaneOrder, moveLaneBefore } from './utilities/laneOrder';
 import { useDays } from './hooks/useDays';
@@ -44,12 +44,6 @@ export function App() {
     [],
     isStringArray,
   );
-  const [span, setSpan] = usePersistentState<number>(
-    'collapsed-span',
-    1,
-    (value): value is number => typeof value === 'number' && value >= 1 && value <= 14,
-  );
-
   const collapsedHidden = useMemo(() => new Set(collapsedHiddenIds), [collapsedHiddenIds]);
   const toggleCollapsedPhenotype = useCallback(
     (laneId: string) => {
@@ -62,11 +56,15 @@ export function App() {
     [setCollapsedHiddenIds],
   );
 
-  // The collapsed view can reach back over several days. Only days the server
-  // has already processed load on their own; see useDayRange.
+  /**
+   * The collapsed view spans a month either side of the chosen day. It is
+   * clamped at today because a day that has not happened holds no data and
+   * cannot be reconstructed. Panels load as they scroll into view rather than
+   * all at once; see useDayRange.
+   */
   const rangeDates = useMemo(
-    () => (selectedDate ? datesEndingAt(selectedDate, span) : []),
-    [selectedDate, span],
+    () => (selectedDate ? datesAround(selectedDate, 30, 30, today) : []),
+    [selectedDate, today],
   );
   const storedDates = useMemo(() => {
     const stored = new Set<string>();
@@ -217,8 +215,6 @@ export function App() {
                   onZoomChange={setZoom}
                   onRefresh={() => void refresh()}
                   refreshing={refreshing}
-                  span={span}
-                  onSpanChange={setSpan}
                 />
 
                 {mode === 'dag' ? (
@@ -241,6 +237,7 @@ export function App() {
                 ) : (
                   <CollapsedTimeline
                     days={rangeDays}
+                    focusDate={selectedDate}
                     hidden={collapsedHidden}
                     onTogglePhenotype={toggleCollapsedPhenotype}
                     selectedKey={selectedKey}

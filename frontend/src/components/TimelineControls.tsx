@@ -121,18 +121,9 @@ interface TimelineControlsProps {
   onZoomChange: (zoom: number) => void;
   onRefresh: () => void;
   refreshing: boolean;
-  span: number;
-  onSpanChange: (span: number) => void;
 }
 
 const ZOOM_STEPS = [1, 1.5, 2, 3];
-
-/** How many days the collapsed view reaches back over. */
-const SPANS = [
-  { value: 1, label: '1 day' },
-  { value: 3, label: '3 days' },
-  { value: 7, label: '7 days' },
-];
 
 export function TimelineControls({
   lanes,
@@ -144,8 +135,6 @@ export function TimelineControls({
   onZoomChange,
   onRefresh,
   refreshing,
-  span,
-  onSpanChange,
 }: TimelineControlsProps) {
   const zoomIndex = ZOOM_STEPS.indexOf(zoom);
 
@@ -175,31 +164,6 @@ export function TimelineControls({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {mode === 'collapsed' ? (
-          <div
-            className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5"
-            role="group"
-            aria-label="Days shown"
-          >
-            {SPANS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={span === option.value}
-                data-testid={`span-${option.value}`}
-                onClick={() => onSpanChange(option.value)}
-                className={`rounded-[6px] px-2.5 py-1.5 text-[12px] font-medium transition ${
-                  span === option.value
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
         {mode !== 'dag' ? (
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 px-1 py-0.5">
           <button

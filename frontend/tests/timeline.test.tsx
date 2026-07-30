@@ -188,7 +188,7 @@ describe('collapsed timeline', () => {
   });
 
   const asRange = (timeline: DayTimeline) => [
-    { date: timeline.date, timeline, status: 'loaded' as const },
+    { date: timeline.date, timeline, status: 'loaded' as const, stored: true },
   ];
 
   it('renders the major events on the shared axis without causal arrows', () => {
@@ -196,6 +196,7 @@ describe('collapsed timeline', () => {
     render(
       <CollapsedTimeline
         days={asRange(timeline)}
+        focusDate={timeline.date}
         hidden={new Set()}
         onTogglePhenotype={vi.fn()}
         selectedKey={null}
@@ -219,6 +220,7 @@ describe('collapsed timeline', () => {
     const { rerender } = render(
       <CollapsedTimeline
         days={asRange(timeline)}
+        focusDate={timeline.date}
         hidden={new Set()}
         onTogglePhenotype={vi.fn()}
         selectedKey={null}
@@ -232,6 +234,7 @@ describe('collapsed timeline', () => {
     rerender(
       <CollapsedTimeline
         days={asRange(timeline)}
+        focusDate={timeline.date}
         hidden={new Set(['activity'])}
         onTogglePhenotype={vi.fn()}
         selectedKey={null}
@@ -254,9 +257,10 @@ describe('collapsed timeline', () => {
     render(
       <CollapsedTimeline
         days={[
-          { date: '2026-07-01', timeline: null, status: 'unfetched' },
+          { date: '2026-07-01', timeline: null, status: 'unfetched', stored: false },
           ...asRange(timeline),
         ]}
+        focusDate={timeline.date}
         hidden={new Set()}
         onTogglePhenotype={vi.fn()}
         selectedKey={null}
@@ -276,7 +280,8 @@ describe('collapsed timeline', () => {
     const timeline = makeTimeline();
     render(
       <CollapsedTimeline
-        days={[{ date: '2026-07-01', timeline: null, status: 'unfetched' }, ...asRange(timeline)]}
+        days={[{ date: '2026-07-01', timeline: null, status: 'unfetched', stored: false }, ...asRange(timeline)]}
+        focusDate={timeline.date}
         hidden={new Set()}
         onTogglePhenotype={vi.fn()}
         selectedKey={null}
@@ -384,8 +389,6 @@ describe('controls', () => {
       onZoomChange: vi.fn(),
       onRefresh: vi.fn(),
       refreshing: false,
-      span: 1,
-      onSpanChange: vi.fn(),
       ...overrides,
     };
     render(<TimelineControls {...props} />);

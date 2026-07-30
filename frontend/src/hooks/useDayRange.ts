@@ -1,14 +1,16 @@
 /**
  * Load a run of consecutive days for the collapsed view.
  *
- * Only days the server has already processed are fetched automatically.
- * Requesting an unprocessed day makes the backend go out to Home Assistant and
- * the wearable MCP and rebuild it, which can take the better part of a minute —
- * so widening the window must never silently kick off five of those. An
- * unfetched day is reported as such and loaded only when explicitly asked for.
+ * Nothing is fetched on its own. The window spans two months, and pulling every
+ * stored day in it up front would fire dozens of requests for panels scrolled
+ * far off screen; the collapsed view asks for a day only as its panel comes
+ * into view. A day the server has never processed is never fetched
+ * automatically at all, because reconstructing one goes out to Home Assistant
+ * and the wearable MCP and takes the better part of a minute — that stays an
+ * explicit choice.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { DayTimeline } from '../types/timeline';
 
@@ -18,39 +20,62 @@ export interface RangeDay {
   date: string;
   timeline: DayTimeline | null;
   status: DayStatus;
+  /** Whether the server already holds a processed timeline for this day. */
+  stored: boolean;
   error?: string;
 }
 
-/** `count` consecutive dates ending at `endDate`, oldest first. */
-export function datesEndingAt(endDate: string, count: number): string[] {
+/**
+ * `before` days back and `after` days forward from `centre`, oldest first.
+ *
+ * `latest` clamps the forward end. Days that have not happened yet hold no
+ * data and cannot be reconstructed, so offering them would be offering nothing.
+ */
+export function datesAround(
+  centre: string,
+  before: number,
+  after: number,
+  latest?: string | null,
+): string[] {
   const dates: string[] = [];
-  const end = new Date(`${endDate}T12:00:00Z`);
-  for (let offset = count - 1; offset >= 0; offset -= 1) {
-    const day = new Date(end);
-    day.setUTCDate(day.getUTCDate() - offset);
-    dates.push(day.toISOString().slice(0, 10));
+  const middle = new Date(`${centre}T12:00:00Z`);
+  for (let offset = -before; offset <= after; offset += 1) {
+    const day = new Date(middle);
+    day.setUTCDate(day.getUTCDate() + offset);
+    const iso = day.toISOString().slice(0, 10);
+    if (latest && iso > latest) break;
+    dates.push(iso);
   }
   return dates;
 }
 
 export function useDayRange(dates: string[], storedDates: Set<string>) {
   const [days, setDays] = useState<Record<string, RangeDay>>({});
-  const cache = useRef<Map<string, DayTimeline>>(new Map());
   const inFlight = useRef<Set<string>>(new Set());
-  const key = dates.join(',');
 
-  const fetchDay = useCallback((date: string) => {
+  const load = useCallback((date: string) => {
     if (inFlight.current.has(date)) return;
     inFlight.current.add(date);
-    setDays((current) => ({
-      ...current,
-      [date]: { date, timeline: current[date]?.timeline ?? null, status: 'loading' },
-    }));
+    setDays((current) => {
+      if (current[date]?.status === 'loaded') return current;
+      return {
+        ...current,
+        [date]: {
+          date,
+          timeline: current[date]?.timeline ?? null,
+          status: 'loading',
+          stored: current[date]?.stored ?? false,
+        },
+      };
+    });
+
     void api
       .day(date)
       .then((timeline) => {
-        cache.current.set(date, timeline);
-        setDays((current) => ({ ...current, [date]: { date, timeline, status: 'loaded' } }));
+        setDays((current) => ({
+          ...current,
+          [date]: { date, timeline, status: 'loaded', stored: true },
+        }));
       })
       .catch((cause) => {
         setDays((current) => ({
@@ -59,6 +84,7 @@ export function useDayRange(dates: string[], storedDates: Set<string>) {
             date,
             timeline: null,
             status: 'error',
+            stored: current[date]?.stored ?? false,
             error: cause instanceof Error ? cause.message : String(cause),
           },
         }));
@@ -68,34 +94,13 @@ export function useDayRange(dates: string[], storedDates: Set<string>) {
       });
   }, []);
 
-  useEffect(() => {
-    for (const date of key.split(',').filter(Boolean)) {
-      if (cache.current.has(date)) {
-        const timeline = cache.current.get(date)!;
-        setDays((current) =>
-          current[date]?.status === 'loaded'
-            ? current
-            : { ...current, [date]: { date, timeline, status: 'loaded' } },
-        );
-        continue;
-      }
-      if (storedDates.has(date)) {
-        fetchDay(date);
-      } else {
-        setDays((current) =>
-          current[date]
-            ? current
-            : { ...current, [date]: { date, timeline: null, status: 'unfetched' } },
-        );
-      }
-    }
-    // `storedDates` is rebuilt on every render of the caller, so keying the
-    // effect on its contents rather than its identity avoids a refetch loop.
-  }, [key, [...storedDates].sort().join(','), fetchDay]);
+  const ordered: RangeDay[] = dates.map((date) => {
+    const known = days[date];
+    // The stored flag comes from the day index, which refreshes independently
+    // of anything already fetched here.
+    if (known) return { ...known, stored: known.status === 'loaded' || storedDates.has(date) };
+    return { date, timeline: null, status: 'unfetched', stored: storedDates.has(date) };
+  });
 
-  const ordered: RangeDay[] = dates.map(
-    (date) => days[date] ?? { date, timeline: null, status: 'unfetched' },
-  );
-
-  return { days: ordered, load: fetchDay };
+  return { days: ordered, load };
 }

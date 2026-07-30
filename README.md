@@ -136,9 +136,10 @@ controls shape it:
 
 - **Phenotype toggles** switch individual streams in and out, because a busy day
   puts more on one line than one line can hold.
-- **1 / 3 / 7 days** widens the window into the days before the selected one,
-  scrolling horizontally. The selected day is the rightmost panel and the view
-  opens there, with history to its left.
+- **The window spans a month either side** of the selected day, scrolling
+  horizontally. The view opens centred on that day, with history to its left and
+  what followed to its right. The forward end stops at today, since a day that
+  has not happened holds no data and cannot be reconstructed.
 
 Each day is drawn as its own panel with its own scale rather than laid on one
 continuous ruler. A day is 23 or 25 hours across a daylight-saving change, so a
@@ -146,11 +147,13 @@ single linear ruler would either misplace the boundaries or silently stretch one
 day; a panel per day keeps every day internally exact and makes the boundary
 explicit.
 
-**Widening the window never triggers a sync.** Only days the server has already
-processed load on their own — reconstructing a new day goes out to Home
-Assistant and the wearable MCP and can take the better part of a minute, and
-five of those firing because you clicked *7 days* would be a nasty surprise. An
-unprocessed day shows a **Fetch this day** button instead.
+**Panels load as they scroll into view, and only if the day is already
+processed.** Sixty-one days is far more than fits on screen, so pulling them all
+up front would mean dozens of requests for panels nobody has scrolled to. A day
+the server has *never* processed is never fetched automatically at all —
+reconstructing one goes out to Home Assistant and the wearable MCP and takes the
+better part of a minute, so it shows a **Fetch this day** button and stays a
+deliberate choice.
 
 ---
 
