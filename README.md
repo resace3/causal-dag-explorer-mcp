@@ -88,7 +88,10 @@ that stopped reporting is drawn as a hatched gap rather than a smooth line.
 ### Arranging the rows
 
 Each row has a handle on hover: drag it, or use the up/down buttons beside it,
-and the order is remembered. The saved order is a list of lane ids and is
+and the order is remembered. Hovering also reveals a **×** on the right of the
+row, which hides that lane; it stays restorable from *Visible data streams*,
+which is what the title on the control says, because a bare × otherwise reads
+as deleting the data. The saved order is a list of lane ids and is
 routinely stale in both directions — a lane vanishes on a day with no data for
 it, and a new one appears when a source starts reporting — so a lane that
 disappears today and returns tomorrow comes back where you left it, and a lane

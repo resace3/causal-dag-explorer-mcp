@@ -233,6 +233,7 @@ export function App() {
                     onSelect={setSelection}
                     zoom={zoom}
                     onReorder={reorderLanes}
+                    onHideLane={toggleLane}
                   />
                 ) : (
                   <CollapsedTimeline

@@ -23,6 +23,8 @@ interface TimelineProps {
   zoom: number;
   /** Move `laneId` so it sits where `beforeLaneId` currently is. */
   onReorder?: (laneId: string, beforeLaneId: string) => void;
+  /** Hide one row. It stays restorable from the stream-visibility control. */
+  onHideLane?: (laneId: string) => void;
 }
 
 export function Timeline({
@@ -32,6 +34,7 @@ export function Timeline({
   onSelect,
   zoom,
   onReorder,
+  onHideLane,
 }: TimelineProps) {
   const { ref, width } = useElementWidth<HTMLDivElement>(900);
   const plotWidth = Math.max(width, MIN_PLOT_WIDTH) * zoom;
@@ -70,6 +73,7 @@ export function Timeline({
           <LaneLabel
             key={lane.id}
             lane={lane}
+            onHide={onHideLane ? () => onHideLane(lane.id) : undefined}
             reorder={
               onReorder
                 ? {

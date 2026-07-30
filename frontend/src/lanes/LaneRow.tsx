@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ChevronUpIcon, GripIcon, LaneIcon } from '../components/Icons';
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, GripIcon, LaneIcon } from '../components/Icons';
 import type { DayScale } from '../timeline/scale';
 import type { Lane, Selection } from '../types/timeline';
 import { accentTheme, laneHeight } from '../utilities/lanes';
@@ -35,7 +35,15 @@ export interface LaneReorder {
   dropTarget: boolean;
 }
 
-export function LaneLabel({ lane, reorder }: { lane: Lane; reorder?: LaneReorder }) {
+export function LaneLabel({
+  lane,
+  reorder,
+  onHide,
+}: {
+  lane: Lane;
+  reorder?: LaneReorder;
+  onHide?: () => void;
+}) {
   const theme = accentTheme(lane.accent);
 
   return (
@@ -108,7 +116,7 @@ export function LaneLabel({ lane, reorder }: { lane: Lane; reorder?: LaneReorder
       >
         <LaneIcon laneId={lane.id} size={19} />
       </span>
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span
           className="block truncate text-[13.5px] font-semibold leading-tight"
           style={{ color: theme.text }}
@@ -119,6 +127,27 @@ export function LaneLabel({ lane, reorder }: { lane: Lane; reorder?: LaneReorder
           {lane.description}
         </span>
       </span>
+
+      {onHide ? (
+        <button
+          type="button"
+          onClick={onHide}
+          // Inside a draggable row, so it must not become a drag source itself.
+          draggable={false}
+          aria-label={`Hide ${lane.label}`}
+          // The row is hidden, not deleted, and the title says where it went —
+          // a bare × invites the reading that the data itself is being removed.
+          title={`Hide ${lane.label} — restore it from “Visible data streams”`}
+          data-testid={`lane-hide-${lane.id}`}
+          // Floated rather than laid out: at opacity-0 it would still occupy
+          // its width, permanently narrowing the lane description for the sake
+          // of a control that is invisible most of the time. The white backing
+          // keeps it legible over any text it happens to cover on hover.
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md bg-white p-1 text-slate-300 opacity-0 shadow-sm transition hover:bg-rose-50 hover:text-rose-500 focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          <CloseIcon size={14} />
+        </button>
+      ) : null}
     </div>
   );
 }

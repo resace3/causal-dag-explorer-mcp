@@ -136,6 +136,58 @@ describe('expanded timeline', () => {
     expect(strokes.length).toBeGreaterThanOrEqual(2);
   });
 
+  describe('removing a row', () => {
+    const renderWithHide = () => {
+      const timeline = makeTimeline();
+      const onHideLane = vi.fn();
+      render(
+        <Timeline
+          timeline={timeline}
+          lanes={timeline.lanes.filter((lane) => lane.available)}
+          selectedKey={null}
+          onSelect={vi.fn()}
+          zoom={1}
+          onHideLane={onHideLane}
+        />,
+      );
+      return onHideLane;
+    };
+
+    it('offers a close control on every row', () => {
+      renderWithHide();
+      expect(screen.getByTestId('lane-hide-activity')).toBeInTheDocument();
+      expect(screen.getByTestId('lane-hide-sleep')).toBeInTheDocument();
+    });
+
+    it('keeps the control out of the way until the row is hovered', () => {
+      renderWithHide();
+      // Transparent by default, revealed by the row's hover and by keyboard
+      // focus — hover alone would leave it unreachable without a mouse.
+      const button = screen.getByTestId('lane-hide-activity');
+      expect(button.className).toContain('opacity-0');
+      expect(button.className).toContain('group-hover:opacity-100');
+      expect(button.className).toContain('focus-visible:opacity-100');
+    });
+
+    it('hides the row it belongs to', async () => {
+      const onHideLane = renderWithHide();
+      await userEvent.click(screen.getByTestId('lane-hide-sleep'));
+      expect(onHideLane).toHaveBeenCalledWith('sleep');
+    });
+
+    it('says what it does, and that the row can come back', () => {
+      renderWithHide();
+      const button = screen.getByTestId('lane-hide-activity');
+      expect(button).toHaveAttribute('aria-label', 'Hide Activity');
+      expect(button.getAttribute('title')).toMatch(/restore/i);
+    });
+
+    it('is left out entirely when no handler is supplied', () => {
+      renderTimeline();
+      expect(screen.queryByTestId('lane-hide-activity')).not.toBeInTheDocument();
+    });
+  });
+
   it('widens the plot when zoomed', () => {
     const timeline = makeTimeline();
     const { rerender } = render(
