@@ -1,0 +1,29 @@
+# Optional. The project runs perfectly well without Docker — see the README.
+#
+#   docker compose up --build      then open http://127.0.0.1:8000
+#
+# The image builds the frontend and lets the backend serve it, so the whole app
+# lives on one port. Bound to 127.0.0.1 so nothing is exposed to the network.
+
+services:
+  yesterday-timeline:
+    build: .
+    image: yesterday-timeline:latest
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      USE_MOCK_DATA: "${USE_MOCK_DATA:-true}"
+      MOCK_DATA_SEED: "${MOCK_DATA_SEED:-42}"
+      LOCAL_TIMEZONE: "${LOCAL_TIMEZONE:-America/New_York}"
+      HOME_ASSISTANT_URL: "${HOME_ASSISTANT_URL:-}"
+      HOME_ASSISTANT_TOKEN: "${HOME_ASSISTANT_TOKEN:-}"
+      DATA_DIR: /data
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - yesterday-data:/data
+    restart: unless-stopped
+
+volumes:
+  yesterday-data:

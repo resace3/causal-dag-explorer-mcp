@@ -1,0 +1,230 @@
+# Yesterday Timeline configuration.
+#
+# Copy this file to `config.yaml` and edit it. `config.yaml` is git-ignored.
+# Secrets never live here — the Home Assistant URL and token come from `.env`.
+#
+# Every threshold used by the feature-engineering pipeline is in this file, so
+# rules can be tuned without touching visualization code.
+
+# IANA timezone used to work out which local calendar day "yesterday" was.
+# LOCAL_TIMEZONE in .env overrides this.
+timezone: America/New_York
+
+# Data sources are MCP integrations. Leave `command` unset and the timeline
+# reuses the server definition already in your MCP client's configuration, so
+# credentials stay in one place.
+mcp:
+  servers:
+    ha-mcp:
+      enabled: true
+      discover_from_client: true
+    garmin:
+      enabled: true
+      discover_from_client: true
+      # Or launch it explicitly:
+      # command: uvx
+      # args: ["--from", "git+https://github.com/Taxuspt/garmin_mcp", "garmin-mcp"]
+
+home_assistant:
+  enabled: true
+  # Shown in the Data Sources panel. History is read over the REST API for
+  # speed; this records which MCP integration the same instance corresponds to.
+  mcp_server: ha-mcp
+
+  # Map your own entity IDs here. Nothing is hardcoded in the application.
+  # Entities listed but missing from Home Assistant produce a warning, not a crash.
+  entities:
+    presence:
+      - person.user
+
+    motion:
+      - binary_sensor.living_room_motion
+      - binary_sensor.bedroom_motion
+      - binary_sensor.kitchen_motion
+
+    temperature:
+      - sensor.bedroom_temperature
+      - sensor.living_room_temperature
+
+    illuminance:
+      - sensor.living_room_illuminance
+
+    humidity:
+      - sensor.living_room_humidity
+
+    # Optional. Used only as a fallback when the wearable has no sleep record.
+    sleep:
+      - binary_sensor.bed_occupied
+
+    # Contact sensors. Openings are occupancy evidence, not motion, so they
+    # get their own group and their own label.
+    door:
+      - binary_sensor.front_door
+
+    # Binary sensors that mean "the user is actively using a device", such as
+    # the Home Assistant companion app's screen-interactive sensor.
+    device_use:
+      - binary_sensor.phone_interactive
+
+    # Cumulative daily step counters. These reset to zero at midnight, and the
+    # reset is detected rather than drawn as a huge negative step.
+    steps:
+      - sensor.you_steps
+
+    # A once-a-day resting figure. It is drawn as a single labelled point,
+    # never interpolated into a heart-rate curve.
+    resting_heart_rate:
+      - sensor.you_resting_heart_rate
+
+    # A genuinely continuous heart-rate entity, if your setup exposes one.
+    heart_rate: []
+
+    # Phone location. Only the tracker's zone state is read — the latitude,
+    # longitude and gps_accuracy attributes are never touched.
+    location:
+      - device_tracker.your_phone
+
+    # Reverse-geocoded place name for the same phone, shown at town level.
+    place:
+      - sensor.your_phone_geocoded_location
+
+wearable:
+  # mock            - deterministic synthetic data, no credentials required
+  # json_file       - read an export written by your own tooling
+  # home_assistant  - a wearable whose data already reaches Home Assistant
+  # garmin_mcp      - the Garmin MCP server (sleep stages, continuous heart
+  #                   rate, Body Battery, real activity records)
+  provider: mock
+  device_name: Mock Band 3
+
+  json_file:
+    path: ./data/wearable.json
+
+  # Used when provider is `garmin_mcp`. Only read-only get_* tools are called.
+  garmin_mcp:
+    device_name: Garmin
+    mcp_server: garmin
+
+  # Used when provider is `home_assistant`. Fitbit/Withings/Google Fit style
+  # integrations publish the night's sleep as once-a-day summary sensors; the
+  # provider reconstructs one interval from a clock time plus a duration.
+  home_assistant:
+    device_name: Wearable (via Home Assistant)
+    sleep:
+      start_time: sensor.you_sleep_start_time
+      time_in_bed_minutes: sensor.you_sleep_time_in_bed
+      minutes_asleep: sensor.you_sleep_minutes_asleep
+      minutes_awake: sensor.you_sleep_minutes_awake
+      efficiency: sensor.you_sleep_efficiency
+      awakenings: sensor.you_awakenings_count
+
+feature_engineering:
+  # Light categories are derived from measured illuminance, never from fixed
+  # sunrise/sunset clock times.
+  light_category:
+    rule_version: "1.0.0"
+    # When several illuminance entities exist, the first match here wins.
+    entity_priority:
+      - sensor.living_room_illuminance
+    min_duration_minutes: 20
+    thresholds:
+      dark:
+        max_lux: 5
+      dim:
+        min_lux: 5
+        max_lux: 50
+      moderate:
+        min_lux: 50
+        max_lux: 300
+      bright:
+        min_lux: 300
+
+  workout_session:
+    rule_version: "1.1.0"
+    prefer_wearable_records: true
+    # Elevated heart rate on its own is not evidence of a workout. Turning this
+    # on is a deliberate choice and is recorded in each event's provenance.
+    allow_heart_rate_only_inference: false
+    min_duration_minutes: 5
+
+  sleep_interval:
+    rule_version: "1.1.0"
+    prefer_wearable_records: true
+    # Use bed occupancy / bedroom motion only when the wearable has nothing.
+    environmental_fallback: true
+    min_nap_minutes: 10
+    main_sleep_minimum_minutes: 180
+
+  home_presence:
+    rule_version: "1.0.0"
+    home_states: [home]
+    away_states: [not_home, away]
+    min_duration_minutes: 2
+
+  elevated_heart_rate:
+    rule_version: "1.0.0"
+    # Baselines are personal, computed from stored history when enough exists.
+    baseline_window_days: 30
+    sd_threshold: 1.5
+    min_duration_minutes: 8
+
+  temperature_deviation:
+    rule_version: "1.0.0"
+    sd_threshold: 1.5
+    min_duration_minutes: 30
+
+  sustained_inactivity:
+    rule_version: "1.0.0"
+    min_duration_minutes: 150
+
+  # Turns a cumulative step counter into a step-rate line plus walking periods.
+  step_activity:
+    rule_version: "1.0.0"
+    bucket_minutes: 30
+    active_steps_per_minute: 60
+    min_active_minutes: 20
+
+  # Screen-on stretches, merged into sessions.
+  device_use:
+    rule_version: "1.0.0"
+    min_session_minutes: 2
+    merge_within_minutes: 5
+
+  # Phone location. Coordinates are never stored or displayed; this only
+  # controls how much of the geocoded *name* is shown.
+  phone_location:
+    rule_version: "1.0.0"
+    min_duration_minutes: 10
+    merge_within_minutes: 15
+    # Off by default: the timeline shows the town, not the street address.
+    include_street_address: false
+
+  data_gap:
+    rule_version: "1.0.0"
+    # A continuous series is broken, not interpolated, across gaps longer than this.
+    max_gap_minutes: 20
+    # Home Assistant records state *changes*, not samples: a sensor that has not
+    # changed is steady, not missing. Only silence longer than this is unknown.
+    # An explicit `unavailable` state is always a gap, however brief.
+    stale_after_minutes: 180
+
+# Default lane visibility. Lanes with no data are hidden regardless.
+lanes:
+  - id: activity
+    visible: true
+  - id: heart_rate
+    visible: true
+  - id: hrv
+    visible: true
+  - id: readiness
+    visible: true
+  - id: sleep
+    visible: true
+  - id: temperature
+    visible: true
+  - id: environment
+    visible: true
+  - id: presence
+    visible: true
+  - id: location
+    visible: true

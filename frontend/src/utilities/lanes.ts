@@ -1,0 +1,82 @@
+/** Per-lane visual tokens. Colour is always paired with a text label. */
+
+import type { AccentToken } from '../types/timeline';
+
+export interface AccentTheme {
+  /** Line, node stroke, emphasis text. */
+  stroke: string;
+  /** Filled marks and interval bars. */
+  fill: string;
+  /** Area under a line, and block fills. */
+  soft: string;
+  /** Lane row background. */
+  band: string;
+  /** Label text colour. */
+  text: string;
+}
+
+export const ACCENTS: Record<AccentToken, AccentTheme> = {
+  green: { stroke: '#16a34a', fill: '#22c55e', soft: '#dcfce7', band: '#f6fdf8', text: '#15803d' },
+  blue: { stroke: '#2563eb', fill: '#3b82f6', soft: '#dbeafe', band: '#f6f9ff', text: '#1d4ed8' },
+  indigo: { stroke: '#4f46e5', fill: '#6366f1', soft: '#e0e7ff', band: '#f8f8ff', text: '#4338ca' },
+  purple: { stroke: '#7c3aed', fill: '#8b5cf6', soft: '#ede9fe', band: '#fbf9ff', text: '#6d28d9' },
+  orange: { stroke: '#ea580c', fill: '#f97316', soft: '#ffedd5', band: '#fffaf5', text: '#c2410c' },
+  teal: { stroke: '#0d9488', fill: '#14b8a6', soft: '#ccfbf1', band: '#f5fdfc', text: '#0f766e' },
+  sky: { stroke: '#0284c7', fill: '#0ea5e9', soft: '#e0f2fe', band: '#f6fbff', text: '#0369a1' },
+  cyan: { stroke: '#0891b2', fill: '#06b6d4', soft: '#cffafe', band: '#f5fdff', text: '#0e7490' },
+};
+
+export function accentTheme(accent: string): AccentTheme {
+  return ACCENTS[accent as AccentToken] ?? ACCENTS.blue;
+}
+
+/** Row heights, in px. The label column mirrors these exactly. */
+export const LANE_HEIGHTS: Record<string, number> = {
+  activity: 118,
+  heart_rate: 104,
+  hrv: 92,
+  readiness: 100,
+  sleep: 104,
+  temperature: 100,
+  environment: 116,
+  presence: 122,
+  location: 96,
+};
+
+export const DEFAULT_LANE_HEIGHT = 100;
+
+export function laneHeight(laneId: string): number {
+  return LANE_HEIGHTS[laneId] ?? DEFAULT_LANE_HEIGHT;
+}
+
+export const LANE_LABEL_WIDTH = 250;
+export const AXIS_HEIGHT = 34;
+
+/**
+ * Event categories that count as "major" in collapsed mode.
+ * Kept explicit so the collapsed view never silently changes meaning.
+ */
+export const MAJOR_CATEGORIES = new Set([
+  // Sleep
+  'main_sleep',
+  'nap',
+  'time_in_bed',
+  // Activity sessions
+  'strength_training',
+  'running',
+  'walk',
+  'cycling',
+  'walking_period',
+  // Leaving and coming back
+  'left_home',
+  'arrived_home',
+  'zone_named',
+  // One notable physiological stretch — the renderer keeps only the first.
+  'elevated',
+]);
+
+export const GRID_LINE = '#e6ebf2';
+export const GRID_LINE_MINOR = '#f1f4f9';
+export const BASELINE = '#dfe6ef';
+export const MISSING_FILL = '#eef1f5';
+export const MISSING_STROKE = '#c9d2de';

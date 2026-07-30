@@ -1,12 +1,27 @@
-node_modules/
-dist/
-*.log
-data/*.tmp
-data/days.json
+# Secrets and machine-specific configuration — never commit these.
 .env
-.env.*
-!.env.example
-.tmp/
-playwright-report/
-test-results/
-coverage/
+config.yaml
+
+# Locally cached sensor data.
+data/
+*.sqlite3
+
+# Python
+server/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/shot*.mjs
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+tsconfig.tsbuildinfo
