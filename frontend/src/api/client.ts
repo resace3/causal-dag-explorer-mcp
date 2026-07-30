@@ -143,6 +143,23 @@ export interface SuppressedEdgeRow {
   targetLabel: string;
 }
 
+/** What the local reader made of a request for a new row. */
+export interface RowInterpretation {
+  date: string;
+  understood: boolean;
+  summary: string;
+  problem: string | null;
+  /** Stream names this day actually holds, for when the request cannot be read. */
+  known: string[];
+}
+
+export interface CustomRow {
+  id: string;
+  label: string;
+  prompt: string;
+  createdAt: string;
+}
+
 export interface CausalEdgesResponse {
   edges: CausalEdgeRow[];
   suppressed: SuppressedEdgeRow[];
@@ -247,6 +264,21 @@ export const api = {
     ),
   dag: (body: { outcome: string; exposure: string | null; day: string | null }) =>
     request<DagResponse>('/api/dag', { method: 'POST', body: JSON.stringify(body) }),
+  interpretRow: (prompt: string, day: string | null) =>
+    request<RowInterpretation>('/api/rows/interpret', {
+      method: 'POST',
+      body: JSON.stringify({ prompt, day }),
+    }),
+  rows: () => request<{ rows: CustomRow[] }>('/api/rows'),
+  addRow: (prompt: string, day: string | null) =>
+    request<{ id: string; label: string; summary: string }>('/api/rows', {
+      method: 'POST',
+      body: JSON.stringify({ prompt, day }),
+    }),
+  deleteRow: (rowId: string) =>
+    request<{ removed: string }>(`/api/rows/${encodeURIComponent(rowId)}`, {
+      method: 'DELETE',
+    }),
   causalEdges: () => request<CausalEdgesResponse>('/api/dag/edges'),
   addCausalEdge: (body: {
     source: string;

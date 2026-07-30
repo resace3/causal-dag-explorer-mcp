@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api } from './api/client';
 import { DetailsPanel } from './details/DetailsPanel';
 import { PageHeader } from './components/PageHeader';
 import { Sidebar } from './components/Sidebar';
@@ -146,6 +147,17 @@ export function App() {
     }
   }, [current, selection]);
 
+  /** Rows the user added are stored server-side, so removal is a request. */
+  const deleteRow = useCallback(
+    (laneId: string) => {
+      void api
+        .deleteRow(laneId)
+        .then(() => reload())
+        .catch(() => reload());
+    },
+    [reload],
+  );
+
   const toggleLane = useCallback((laneId: string) => {
     setHidden((current) => {
       const next = new Set(current);
@@ -234,6 +246,9 @@ export function App() {
                     zoom={zoom}
                     onReorder={reorderLanes}
                     onHideLane={toggleLane}
+                    onDeleteLane={deleteRow}
+                    date={selectedDate}
+                    onRowAdded={reload}
                   />
                 ) : (
                   <CollapsedTimeline

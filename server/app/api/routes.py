@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Annotated, Any
 
@@ -17,14 +18,17 @@ from ..causal.edits import (
     validate_addition,
 )
 from ..causal.grounding import ground
+from ..custom_lanes.build import build as build_custom_lane
+from ..custom_lanes.interpret import LaneSpec, interpret
 from ..causal.knowledge import EDGES as KNOWLEDGE_EDGES, VARIABLES
 from ..config.loader import get_config, resolve_timezone
 from ..config.settings import get_settings
 from ..connectors.wearables.registry import available_providers
 from ..models.sources import DataSourceReport
-from ..models.timeline import DayTimeline
+from ..models.timeline import DayTimeline, Lane
 from ..services.projection import project
 from ..services.sync import SyncService
+from ..storage.models import CustomLaneRow
 from ..storage.repository import Repository
 from .errors import ApiError
 
@@ -102,6 +106,36 @@ async def data_sources(sync: SyncDep) -> DataSourceReport:
     return await sync.data_sources()
 
 
+def _with_custom_lanes(timeline: DayTimeline, repository: Repository) -> DayTimeline:
+    """Append the rows the user defined.
+
+    Built at read time rather than during the pipeline, so a row definition
+    applies to every day already in the cache and can never corrupt the stored
+    reconstruction it derives from.
+    """
+    rows = repository.get_custom_lanes()
+    if not rows:
+        return timeline
+    for row in rows:
+        try:
+            timeline.lanes.append(
+                build_custom_lane(LaneSpec.from_dict(row.spec), row.id, timeline)
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad row must not lose the day
+            timeline.lanes.append(
+                Lane(
+                    id=row.id,
+                    phenotype=row.id,
+                    label=row.label,
+                    description=row.prompt,
+                    accent="indigo",
+                    available=False,
+                    unavailable_reason=f"This row could not be built ({exc}).",
+                )
+            )
+    return timeline
+
+
 @router.get("/yesterday", response_model=DayTimeline, summary="Yesterday's timeline")
 async def yesterday(
     sync: SyncDep,
@@ -114,7 +148,7 @@ async def yesterday(
     include_raw_metadata: Annotated[bool, Query(alias="includeRawMetadata")] = True,
     include_provenance: Annotated[bool, Query(alias="includeProvenance")] = True,
 ) -> DayTimeline:
-    timeline = await sync.get_or_sync()
+    timeline = _with_custom_lanes(await sync.get_or_sync(), sync.repository)
     return project(
         timeline,
         lanes=lanes.split(",") if lanes else None,
@@ -133,7 +167,7 @@ async def sync_yesterday(
     sync: SyncDep,
     force_refresh: Annotated[bool, Body(embed=True, alias="forceRefresh")] = True,
 ) -> DayTimeline:
-    return await sync.sync(force_refresh=force_refresh)
+    return _with_custom_lanes(await sync.sync(force_refresh=force_refresh), sync.repository)
 
 
 def _parse_day(value: str, sync: SyncService) -> date:
@@ -177,7 +211,9 @@ async def day_timeline(
     include_raw_metadata: Annotated[bool, Query(alias="includeRawMetadata")] = True,
     include_provenance: Annotated[bool, Query(alias="includeProvenance")] = True,
 ) -> DayTimeline:
-    timeline = await sync.get_or_sync(day=_parse_day(day, sync))
+    timeline = _with_custom_lanes(
+        await sync.get_or_sync(day=_parse_day(day, sync)), sync.repository
+    )
     return project(
         timeline,
         lanes=lanes.split(",") if lanes else None,
@@ -197,7 +233,10 @@ async def sync_day(
     sync: SyncDep,
     force_refresh: Annotated[bool, Body(embed=True, alias="forceRefresh")] = True,
 ) -> DayTimeline:
-    return await sync.sync(force_refresh=force_refresh, day=_parse_day(day, sync))
+    return _with_custom_lanes(
+        await sync.sync(force_refresh=force_refresh, day=_parse_day(day, sync)),
+        sync.repository,
+    )
 
 
 @router.get("/dag/variables", summary="Variables available for a causal question")
@@ -397,6 +436,93 @@ async def raw_record(record_id: str, repository: RepositoryDep) -> dict[str, Any
         "unit": row.unit,
         "attributes": row.attributes,
     }
+
+
+def _interpret_for(sync: SyncService, prompt: str, day: str | None):
+    target = _parse_day(day, sync) if day else sync.yesterday().day
+    return interpret(prompt, sync.repository.get_timeline(target)), target
+
+
+@router.post("/rows/interpret", summary="Read a request for a new row, without creating it")
+async def interpret_row(
+    sync: SyncDep,
+    prompt: Annotated[str, Body(embed=True)],
+    day: Annotated[str | None, Body(embed=True)] = None,
+) -> dict[str, Any]:
+    """Preview only.
+
+    Showing what was understood *before* anything is created is the point: the
+    reader is a local rule-based one, and a misreading has to be visible rather
+    than discovered later as a row full of the wrong data.
+    """
+    reading, target = _interpret_for(sync, prompt, day)
+    return {"date": target.isoformat(), **reading.to_dict()}
+
+
+@router.get("/rows", summary="Rows the user has added")
+async def list_rows(repository: RepositoryDep) -> dict[str, Any]:
+    return {
+        "rows": [
+            {
+                "id": row.id,
+                "label": row.label,
+                "prompt": row.prompt,
+                "spec": row.spec,
+                "createdAt": row.created_at.isoformat(),
+            }
+            for row in repository.get_custom_lanes()
+        ]
+    }
+
+
+@router.post("/rows", summary="Add a row described in words")
+async def add_row(
+    sync: SyncDep,
+    prompt: Annotated[str, Body(embed=True)],
+    day: Annotated[str | None, Body(embed=True)] = None,
+) -> dict[str, Any]:
+    reading, _ = _interpret_for(sync, prompt, day)
+    if not reading.understood or reading.spec is None:
+        raise ApiError(
+            "unreadable_row_request",
+            reading.problem or "That request could not be read.",
+            hint=(
+                "Name a stream, optionally with a threshold — for example "
+                "“heart rate above 100”. Known streams: "
+                + ", ".join(reading.known)
+                if reading.known
+                else None
+            ),
+        )
+
+    existing = {row.id for row in sync.repository.get_custom_lanes()}
+    base = re.sub(r"[^a-z0-9]+", "_", reading.spec.label.lower()).strip("_") or "row"
+    lane_id = f"custom_{base}"[:48]
+    suffix = 2
+    while lane_id in existing:
+        lane_id = f"custom_{base}_{suffix}"[:48]
+        suffix += 1
+
+    row = CustomLaneRow(
+        id=lane_id,
+        label=reading.spec.label,
+        prompt=reading.spec.prompt,
+        spec=reading.spec.to_dict(),
+        position=len(existing),
+    )
+    sync.repository.add_custom_lane(row)
+    return {"id": lane_id, "label": row.label, "summary": reading.summary}
+
+
+@router.delete("/rows/{row_id}", summary="Remove a row the user added")
+async def delete_row(row_id: str, repository: RepositoryDep) -> dict[str, Any]:
+    if not repository.delete_custom_lane(row_id):
+        raise ApiError(
+            "row_not_found",
+            f"There is no custom row with id '{row_id}'.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    return {"removed": row_id}
 
 
 @router.get("/lane-config", summary="Lane visibility preferences")

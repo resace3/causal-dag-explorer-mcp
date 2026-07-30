@@ -88,4 +88,22 @@ class CausalEdgeOverrideRow(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
 
 
+class CustomLaneRow(SQLModel, table=True):
+    """A row someone asked for, stored as a resolved definition.
+
+    The original request is kept alongside the definition so the row can always
+    explain itself, and so a future reader can see what was asked for rather
+    than only what the app made of it.
+    """
+
+    __tablename__ = "custom_lanes"
+
+    id: str = Field(primary_key=True)
+    label: str
+    prompt: str
+    spec: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    position: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+
+
 Index("ix_raw_records_day_stream", RawRecordRow.day, RawRecordRow.stream)

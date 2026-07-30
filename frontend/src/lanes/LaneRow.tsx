@@ -39,10 +39,13 @@ export function LaneLabel({
   lane,
   reorder,
   onHide,
+  onDelete,
 }: {
   lane: Lane;
   reorder?: LaneReorder;
   onHide?: () => void;
+  /** Present only for rows the user added, where removal is permanent. */
+  onDelete?: () => void;
 }) {
   const theme = accentTheme(lane.accent);
 
@@ -128,17 +131,22 @@ export function LaneLabel({
         </span>
       </span>
 
-      {onHide ? (
+      {onDelete || onHide ? (
         <button
           type="button"
-          onClick={onHide}
+          onClick={onDelete ?? onHide}
           // Inside a draggable row, so it must not become a drag source itself.
           draggable={false}
-          aria-label={`Hide ${lane.label}`}
-          // The row is hidden, not deleted, and the title says where it went —
-          // a bare × invites the reading that the data itself is being removed.
-          title={`Hide ${lane.label} — restore it from “Visible data streams”`}
-          data-testid={`lane-hide-${lane.id}`}
+          aria-label={onDelete ? `Delete ${lane.label}` : `Hide ${lane.label}`}
+          // A bare × invites the reading that the data itself is being removed,
+          // so the title says which of the two this is. A built-in row is only
+          // hidden; a row the user added is genuinely gone.
+          title={
+            onDelete
+              ? `Delete “${lane.label}” — you added this row, so removing it is permanent`
+              : `Hide ${lane.label} — restore it from “Visible data streams”`
+          }
+          data-testid={onDelete ? `lane-delete-${lane.id}` : `lane-hide-${lane.id}`}
           // Floated rather than laid out: at opacity-0 it would still occupy
           // its width, permanently narrowing the lane description for the sake
           // of a control that is invisible most of the time. The white backing

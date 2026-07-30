@@ -10,6 +10,7 @@ import { LaneLabel, LanePlot } from '../lanes/LaneRow';
 import type { DayTimeline, Lane, Selection } from '../types/timeline';
 import { useElementWidth } from '../hooks/useElementWidth';
 import { AXIS_HEIGHT, LANE_LABEL_WIDTH, laneHeight } from '../utilities/lanes';
+import { AddRow } from './AddRow';
 import { AxisRow, GridLines } from './Axis';
 import { createScale } from './scale';
 
@@ -25,6 +26,11 @@ interface TimelineProps {
   onReorder?: (laneId: string, beforeLaneId: string) => void;
   /** Hide one row. It stays restorable from the stream-visibility control. */
   onHideLane?: (laneId: string) => void;
+  /** Delete a row the user added. Permanent, unlike hiding. */
+  onDeleteLane?: (laneId: string) => void;
+  /** Selected day, so a new row is read against the streams it holds. */
+  date?: string | null;
+  onRowAdded?: () => void;
 }
 
 export function Timeline({
@@ -35,6 +41,9 @@ export function Timeline({
   zoom,
   onReorder,
   onHideLane,
+  onDeleteLane,
+  date = null,
+  onRowAdded,
 }: TimelineProps) {
   const { ref, width } = useElementWidth<HTMLDivElement>(900);
   const plotWidth = Math.max(width, MIN_PLOT_WIDTH) * zoom;
@@ -63,7 +72,8 @@ export function Timeline({
   }, [lanes, scale]);
 
   return (
-    <div className="flex" data-testid="timeline-expanded">
+    <div data-testid="timeline-expanded">
+      <div className="flex">
       <div
         className="shrink-0 border-r border-slate-100 bg-white"
         style={{ width: LANE_LABEL_WIDTH }}
@@ -74,6 +84,11 @@ export function Timeline({
             key={lane.id}
             lane={lane}
             onHide={onHideLane ? () => onHideLane(lane.id) : undefined}
+            onDelete={
+              onDeleteLane && lane.id.startsWith('custom_')
+                ? () => onDeleteLane(lane.id)
+                : undefined
+            }
             reorder={
               onReorder
                 ? {
@@ -119,6 +134,9 @@ export function Timeline({
           <AxisRow scale={scale} position="bottom" />
         </div>
       </div>
+      </div>
+
+      {onRowAdded ? <AddRow date={date} onAdded={onRowAdded} /> : null}
     </div>
   );
 }

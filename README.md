@@ -51,6 +51,7 @@ day could not place are listed rather than dropped.
 
 - [What it does](#what-it-does)
 - [Choosing a day](#choosing-a-day)
+- [Adding your own row](#adding-your-own-row)
 - [The DAG tab](#the-dag-tab)
 - [Quick start (mock data)](#quick-start-mock-data)
 - [Architecture](#architecture)
@@ -129,6 +130,44 @@ one place.
 **Only read-only tools are ever called.** The Garmin MCP also exposes tools that
 create workouts and delete courses; `app/connectors/mcp_client.py` enforces an
 allow-list and refuses anything outside it before the call leaves this process.
+
+---
+
+## Adding your own row
+
+A **+ Add a row** control sits under the expanded timeline. Describe the row in
+words and it is built from the streams the day already holds:
+
+| Request | What you get |
+| --- | --- |
+| `heart rate above 100` | Intervals where the condition held |
+| `heart rate below 50` | The same, the other way |
+| `step rate over 60` | Intervals from the step-rate series |
+| `heart rate` | The series itself, plotted |
+| `sleep`, `when I was away from home` | That lane's events |
+
+**The reader is local and rule-based — not a language model.** It matches stream
+names, synonyms and thresholds against what the day actually recorded, and
+nothing is sent anywhere: shipping the request plus a catalogue of your health
+streams to an API to save writing a parser would be a poor trade.
+
+That makes it fallible in one specific way — it can match something *near* what
+you asked for — so it never creates anything without first showing what it
+understood, and **Add row** stays disabled until there is a reading to agree
+with. A request it cannot read is refused with the streams that day does have.
+
+The case this is built around: asking for `heart rate variability` on a day with
+no HRV must not quietly resolve to `heart rate`, which is a substring of it and
+would produce a plausible-looking row full of the wrong data. It names the
+stream and says the day has none, and a test pins that.
+
+Rows are stored, so they appear on every day, and each one says why it is empty
+when the condition never held. Everything a row produces carries the same
+provenance as a built-in feature — rule id, version, threshold, source records —
+because a row invented in a text box is still a derived feature.
+
+The assistant can add rows too, with real language understanding, through the
+`add_timeline_row` MCP tool.
 
 ---
 
@@ -634,6 +673,9 @@ configuration. If you prefer to pass them explicitly, add an `env` block.
 | `list_days` | List the days the calendar can offer, and which already hold data. |
 | `get_expected_dag` | Build the expected causal graph for an outcome (and optional exposure). A hypothesis, never an estimate. |
 | `list_causal_variables` | List variables usable as an exposure or outcome, and whether each was observed. |
+| `add_timeline_row` | Add a row to the expanded timeline, described in words. |
+| `list_timeline_rows` | List the custom rows, with the request behind each. |
+| `remove_timeline_row` | Remove a custom row. |
 
 Edge edits made in the UI are stored server-side, so `get_expected_dag` reflects
 them too.

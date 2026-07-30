@@ -119,6 +119,55 @@ test.describe('Yesterday timeline', () => {
     expect(backwards).toBe(0);
   });
 
+  test('adds a row from a description, and refuses one it cannot read', async ({ page }) => {
+    await waitForTimeline(page);
+
+    // Start clean, so the run is repeatable.
+    await page.evaluate(async () => {
+      const body = await (await fetch('/api/rows')).json();
+      await Promise.all(
+        body.rows.map((row: { id: string }) =>
+          fetch(`/api/rows/${row.id}`, { method: 'DELETE' }),
+        ),
+      );
+    });
+    await page.reload();
+    await expect(page.getByTestId('timeline-expanded')).toBeVisible({ timeout: 30_000 });
+
+    await page.getByTestId('add-row-open').scrollIntoViewIfNeeded();
+    await page.getByTestId('add-row-open').click();
+    const reading = page.getByTestId('add-row-reading');
+
+    // A request naming no real stream is refused, and Add stays unavailable —
+    // nothing is created on a reading the user has not seen and agreed with.
+    await page.getByTestId('add-row-prompt').fill('blood glucose above 7');
+    await expect(reading).toContainText(/No stream in this day matches/, { timeout: 15_000 });
+    await expect(page.getByTestId('add-row-submit')).toBeDisabled();
+
+    // A readable one shows what it understood before anything happens.
+    await page.getByTestId('add-row-prompt').fill('heart rate below 50');
+    await expect(reading).toContainText(/Understood as/, { timeout: 15_000 });
+    await expect(reading).toContainText(/below 50/);
+    await expect(page.getByTestId('add-row-submit')).toBeEnabled();
+
+    await page.getByTestId('add-row-submit').click();
+
+    // The row lands on the timeline, and is deletable rather than merely hidden.
+    const row = page.locator('[data-testid^="lane-label-custom_"]').first();
+    await expect(row).toBeVisible({ timeout: 60_000 });
+    await expect(row).toContainText(/below 50/);
+    await expect(
+      page.locator('[data-testid^="lane-delete-custom_"]').first(),
+    ).toHaveCount(1);
+
+    await page.evaluate(async () => {
+      const body = await (await fetch('/api/rows')).json();
+      await Promise.all(
+        body.rows.map((r: { id: string }) => fetch(`/api/rows/${r.id}`, { method: 'DELETE' })),
+      );
+    });
+  });
+
   test('draws a causal arrow by dragging between rows', async ({ page }) => {
     // Editing lists every variable, so both ends of the drag need to fit.
     await page.setViewportSize({ width: 1400, height: 1200 });

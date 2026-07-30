@@ -283,6 +283,45 @@ async def list_causal_variables(date: str | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def add_timeline_row(description: str, date: str | None = None) -> dict[str, Any]:
+    """Add a row to the expanded timeline, described in words.
+
+    The row is derived from streams the day already holds — for example
+    "heart rate above 100", "step rate over 60", "sleep". A threshold produces
+    intervals where the condition held; naming a stream alone plots it as it was
+    recorded. The row is stored and appears on every day thereafter.
+
+    The request is resolved against the streams that day actually has, so this
+    reports back what it understood. If it could not be read, the response says
+    why and lists the available streams rather than guessing.
+
+    Args:
+        description: What the row should show, e.g. "heart rate above 100".
+        date: Which day to resolve stream names against (YYYY-MM-DD).
+    """
+    body: dict[str, Any] = {"prompt": description}
+    if date:
+        body["day"] = date
+    return await _request("POST", "/api/rows", json=body)
+
+
+@mcp.tool()
+async def list_timeline_rows() -> dict[str, Any]:
+    """List the custom rows added to the timeline, with the request behind each."""
+    return await _request("GET", "/api/rows")
+
+
+@mcp.tool()
+async def remove_timeline_row(row_id: str) -> dict[str, Any]:
+    """Remove a custom row.
+
+    Args:
+        row_id: An id from list_timeline_rows, e.g. "custom_heart_rate_above_100_bpm".
+    """
+    return await _request("DELETE", f"/api/rows/{row_id}")
+
+
+@mcp.tool()
 async def get_data_sources() -> dict[str, Any]:
     """Return the status and capabilities of every configured data source."""
     report = await _request("GET", "/api/data-sources")

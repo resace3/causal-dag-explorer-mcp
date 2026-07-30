@@ -18,6 +18,7 @@ from ..models.timeline import DayTimeline, TimelineEvent
 from .models import (
     DayTimelineRow,
     CausalEdgeOverrideRow,
+    CustomLaneRow,
     LaneConfigRow,
     RawRecordRow,
     SyncRunRow,
@@ -277,6 +278,28 @@ class Repository:
         """Drop an override, restoring whatever the knowledge base says."""
         with self.session() as session:
             row = session.get(CausalEdgeOverrideRow, (source, target))
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
+    # -- custom rows ------------------------------------------------------
+
+    def get_custom_lanes(self) -> list[CustomLaneRow]:
+        with self.session() as session:
+            rows = list(session.exec(select(CustomLaneRow)).all())
+        return sorted(rows, key=lambda row: (row.position, row.created_at))
+
+    def add_custom_lane(self, row: CustomLaneRow) -> CustomLaneRow:
+        with self.session() as session:
+            session.merge(row)
+            session.commit()
+        return row
+
+    def delete_custom_lane(self, lane_id: str) -> bool:
+        with self.session() as session:
+            row = session.get(CustomLaneRow, lane_id)
             if row is None:
                 return False
             session.delete(row)
