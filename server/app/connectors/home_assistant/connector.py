@@ -8,7 +8,6 @@ timeline still renders from wearable data.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -17,6 +16,7 @@ from ...config.schema import ENTITY_GROUPS, HomeAssistantConfig
 from ...config.settings import Settings
 from ...models.raw import RawRecord
 from ...models.sources import SourceStatus
+from ..base import ConnectorResult
 from .client import (
     HomeAssistantClient,
     HomeAssistantError,
@@ -40,6 +40,7 @@ STREAM_BY_DOMAIN = {
     "sleep": "bed_occupancy",
     "door": "door",
     "device_use": "device_use",
+    "app_usage": "app_usage",
     "steps": "steps",
     "resting_heart_rate": "resting_heart_rate",
     "heart_rate": "heart_rate",
@@ -55,17 +56,6 @@ NUMERIC_DOMAINS = {
     "resting_heart_rate",
     "heart_rate",
 }
-
-
-@dataclass
-class ConnectorResult:
-    records: list[RawRecord] = field(default_factory=list)
-    status: SourceStatus = "disconnected"
-    detail: str | None = None
-    capabilities: list[str] = field(default_factory=list)
-    entity_count: int = 0
-    warnings: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
 
 
 class HomeAssistantConnector:

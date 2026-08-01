@@ -147,9 +147,25 @@ VARIABLES: dict[str, Variable] = {
         ),
         Variable(
             "device_use",
-            "Device use",
+            "Phone use",
             "Screen-on sessions reported by the phone.",
-            lane="presence",
+            lane="phone_use",
+            unit="min",
+        ),
+        Variable(
+            "tiktok",
+            "TikTok",
+            "Time in one named app, from the phone's last-used-app sensor. A "
+            "subset of phone use rather than a quantity independent of it: "
+            "conditioning on both asks the data a question it cannot answer.",
+            lane="tiktok",
+            unit="min",
+        ),
+        Variable(
+            "computer_use",
+            "Computer use",
+            "Stretches at this machine, from the idle and focus watchers.",
+            lane="computer_use",
             unit="min",
         ),
         Variable(
@@ -246,6 +262,40 @@ EDGES: list[CausalEdge] = [
         "device_use",
         "sleep_onset",
         "Engagement with a device delays going to bed, beyond its light.",
+        "plausible",
+    ),
+    # The same two claims as the phone above. Asserting that a lit phone delays
+    # sleep while a lit monitor does not would be an asymmetry the evidence does
+    # not support; both are here at the same strength, and either can be removed
+    # from the ledger under the graph.
+    CausalEdge(
+        "computer_use",
+        "light_evening",
+        "A lit monitor contributes to evening light exposure.",
+        "plausible",
+    ),
+    CausalEdge(
+        "computer_use",
+        "sleep_onset",
+        "Working or reading at a computer delays going to bed, beyond its light.",
+        "plausible",
+    ),
+    # The tracked app is a *part* of phone use, so no arrow runs between the
+    # two: an arrow would claim one causes the other when one simply contains
+    # the other. What it gets is its own version of the phone's two claims, on
+    # the reasoning that an endless feed and a phone call are not the same
+    # fifteen minutes. Both are hypotheses; neither has been tested here.
+    CausalEdge(
+        "tiktok",
+        "sleep_onset",
+        "A feed with no end delays putting the phone down, beyond screen time "
+        "in general.",
+        "speculative",
+    ),
+    CausalEdge(
+        "tiktok",
+        "light_evening",
+        "A lit screen held close contributes to evening light exposure.",
         "plausible",
     ),
     # Sleep structure

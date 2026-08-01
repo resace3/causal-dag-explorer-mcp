@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     )
     home_assistant_verify_ssl: bool = Field(default=True, alias="HOME_ASSISTANT_VERIFY_SSL")
 
+    # --- ActivityWatch --------------------------------------------------
+    # No credential exists: the server listens on loopback only and is not
+    # authenticated, which is also why it is never addressed off-machine.
+    activitywatch_url: str = Field(default="http://localhost:5600", alias="ACTIVITYWATCH_URL")
+    activitywatch_timeout_seconds: float = Field(
+        default=20.0, alias="ACTIVITYWATCH_TIMEOUT_SECONDS"
+    )
+
     # --- Locale ---------------------------------------------------------
     local_timezone: str = Field(default="America/New_York", alias="LOCAL_TIMEZONE")
 

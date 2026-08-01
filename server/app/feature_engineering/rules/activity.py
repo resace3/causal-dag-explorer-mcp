@@ -318,5 +318,5 @@ def _workout_events(context: RuleContext) -> tuple[list[TimelineEvent], str]:
         )
 
     if not events:
-        return events, "No activity sessions were recorded yesterday."
+        return events, "No activity sessions were recorded on this day."
     return events, ""

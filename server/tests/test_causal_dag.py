@@ -38,6 +38,76 @@ def test_every_edge_connects_known_variables():
         assert edge.target in VARIABLES, f"unknown target {edge.target}"
 
 
+# --------------------------------------------------------------------------
+# The whole model — what the DAG tab shows, with no question asked
+# --------------------------------------------------------------------------
+
+
+def test_the_whole_model_holds_every_variable_and_every_arrow():
+    """The tab is the model itself, so nothing may be filtered out of it.
+
+    A variable missing here is one no arrow can be drawn to, and the arrows
+    worth adding by hand are precisely the ones to variables no source records.
+    """
+    dag = build_dag()
+    assert {node.id for node in dag.nodes} == set(VARIABLES)
+    assert len(dag.edges) == len(EDGES)
+    assert dag.outcome is None
+    assert dag.exposure is None
+
+
+def test_the_whole_model_assigns_no_roles():
+    """Confounder and mediator are relations to a question, not properties.
+
+    Labelling a node "confounder" with no exposure named would be asserting
+    something about a comparison nobody has set up.
+    """
+    dag = build_dag()
+    assert {node.role for node in dag.nodes} == {"context"}
+    assert dag.adjustment_set == []
+    assert dag.mediators == []
+    assert dag.colliders == []
+    assert not any(edge.on_path for edge in dag.edges)
+
+
+def test_the_whole_model_still_refuses_to_look_like_an_estimate():
+    payload = build_dag().to_dict()
+    assert payload["estimated"] is False
+    assert "not an estimate" in payload["disclaimer"]
+
+
+def test_an_exposure_without_an_outcome_is_refused():
+    """Half a question is not a question, and would silently show everything."""
+    with pytest.raises(ValueError, match="relative to an outcome"):
+        build_dag(exposure="exercise")
+
+
+def test_the_whole_model_says_which_variables_nothing_records():
+    dag = build_dag(observed=set())
+    assert any("No connected source records" in note for note in dag.notes)
+
+
+def test_the_api_returns_the_whole_model_when_no_outcome_is_named(client):
+    response = client.post("/api/dag", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] is None
+    assert len(body["nodes"]) == len(VARIABLES)
+    assert body["estimated"] is False
+
+
+def test_naming_an_outcome_still_narrows_the_graph(client):
+    """The whole-model view is the default, not the only thing available.
+
+    `get_expected_dag` and the API still answer a specific question, which is
+    what makes the adjustment set and the collider warnings reachable at all.
+    """
+    whole = client.post("/api/dag", json={}).json()
+    narrowed = client.post("/api/dag", json={"outcome": "sleep_duration"}).json()
+    assert len(narrowed["nodes"]) < len(whole["nodes"])
+    assert narrowed["outcome"] == "sleep_duration"
+
+
 def test_every_edge_states_a_rationale_and_a_strength():
     """An arrow without a stated reason is an assertion, not a hypothesis."""
     for edge in EDGES:

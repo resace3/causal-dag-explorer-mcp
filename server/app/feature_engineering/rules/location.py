@@ -63,7 +63,7 @@ def build_lane(context: RuleContext) -> Lane:
             )
         else:
             lane.unavailable_reason = (
-                "No device tracker produced location data yesterday. Map one under "
+                "No device tracker produced location data on this day. Map one under "
                 "home_assistant.entities.location in config.yaml."
             )
     return lane

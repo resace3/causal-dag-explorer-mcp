@@ -55,7 +55,7 @@ def build_lane(context: RuleContext) -> Lane:
                 "not expose it, and no heart-rate entity is mapped in config.yaml."
             )
         else:
-            lane.unavailable_reason = "No heart-rate samples were recorded yesterday."
+            lane.unavailable_reason = "No heart-rate samples were recorded on this day."
         return lane
 
     samples.sort(key=lambda sample: sample.timestamp)

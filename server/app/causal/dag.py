@@ -1,19 +1,24 @@
-"""Build an expected causal graph for an outcome, optionally given an exposure.
+"""Build a causal graph: the whole model, or the part of it one question needs.
 
 Nothing here is estimated. The output is the set of assumptions you would have
 to be willing to make *before* running an N-of-1 analysis, drawn from the
-knowledge base in `knowledge.py`. Its value is in what it forces you to write
-down: which confounders you cannot measure, which mediators would absorb the
-effect if you adjusted for them, and which colliders would create a spurious
-association if you did.
+knowledge base in `knowledge.py`.
 
-Roles follow the standard definitions:
+Called with no outcome, it returns the **whole model** — every variable, every
+arrow — which is what the DAG tab shows: your own causal picture, editable by
+dragging between rows.
+
+Called with an outcome, it narrows to the part that question needs, and roles
+appear. They follow the standard definitions:
 
 * **confounder** — a common cause of exposure and outcome. Adjust for it.
 * **mediator** — sits on a directed path from exposure to outcome. Adjusting
   for it removes the very effect you are trying to see.
 * **collider** — a common *effect* of two variables. Adjusting for it opens a
   path that was closed, manufacturing an association.
+
+Those roles exist only relative to a named exposure and outcome, so the
+whole-model view has none: every node is context until a question is asked.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .knowledge import EDGES, CausalEdge, Graph, variable
+from .knowledge import EDGES, VARIABLES, CausalEdge, Graph, variable
 
 MAX_ANCESTOR_DEPTH = 2
 
@@ -84,7 +89,9 @@ class DagEdge:
 
 @dataclass
 class Dag:
-    outcome: str
+    outcome: str | None
+    """None when the whole model is being shown rather than one question."""
+
     exposure: str | None
     nodes: list[DagNode] = field(default_factory=list)
     edges: list[DagEdge] = field(default_factory=list)
@@ -115,12 +122,12 @@ class Dag:
 
 
 def build_dag(
-    outcome: str,
+    outcome: str | None = None,
     exposure: str | None = None,
     observed: set[str] | None = None,
     edges: list[CausalEdge] | None = None,
 ) -> Dag:
-    """Assemble the expected DAG for `outcome`, optionally given `exposure`.
+    """Assemble the DAG: the whole model, or the part `outcome` needs.
 
     `edges` defaults to the published knowledge base. The API passes the
     user-edited edge list instead, so an arrow the user added or removed is
@@ -130,6 +137,14 @@ def build_dag(
     edges = EDGES if edges is None else edges
     graph = Graph(edges=list(edges))
     observed = observed or set()
+
+    if outcome is None:
+        if exposure:
+            raise ValueError(
+                "An exposure only means something relative to an outcome. Name an "
+                "outcome as well, or ask for neither and get the whole model."
+            )
+        return _whole_model(observed, edges)
 
     if outcome not in {edge.target for edge in edges} | {edge.source for edge in edges}:
         raise ValueError(f"'{outcome}' is not a variable in the causal knowledge base.")
@@ -203,6 +218,71 @@ def build_dag(
     dag.mediators = sorted(mediators)
     dag.colliders = sorted(colliders)
     dag.notes = _notes(dag, exposure, outcome, observed)
+    return dag
+
+
+def _whole_model(observed: set[str], edges: list[CausalEdge]) -> Dag:
+    """Every variable and every arrow, with no question asked of them.
+
+    This is the DAG tab's own view. Nothing is filtered out: a variable the day
+    recorded nothing for still gets a row, because a model you cannot see all of
+    is a model you cannot edit — the arrows most worth adding are usually the
+    ones to stress, alcohol or work schedule, which no source records.
+
+    Every node is `context`. Confounder, mediator and collider are not
+    properties of a variable; they are properties of a variable *relative to a
+    question*, and none has been asked here.
+    """
+    dag = Dag(outcome=None, exposure=None)
+
+    included = sorted(
+        {edge.source for edge in edges} | {edge.target for edge in edges} | set(VARIABLES)
+    )
+    for index, node in enumerate(included):
+        info = variable(node)
+        dag.nodes.append(
+            DagNode(
+                id=node,
+                label=info.label,
+                description=info.description,
+                role="context",
+                measured=info.measured,
+                lane=info.lane,
+                unit=info.unit,
+                observed=node in observed,
+                # Left-to-right layering orders causes before effects, which is
+                # meaningless without an outcome to measure distance from. The
+                # view places nodes by clock time anyway.
+                layer=0,
+                order=index,
+            )
+        )
+
+    dag.edges = [
+        DagEdge(
+            source=edge.source,
+            target=edge.target,
+            rationale=edge.rationale,
+            strength=edge.strength,
+            lag=edge.lag,
+            on_path=False,
+            origin=edge.origin,
+        )
+        for edge in edges
+    ]
+
+    dag.notes = ["Every variable in the model, and every arrow between them."]
+    unmeasured = sorted(node.label for node in dag.nodes if not node.measured)
+    if unmeasured:
+        dag.notes.append(
+            "No connected source records: "
+            + ", ".join(unmeasured)
+            + ". They stay in the model because leaving them out would not make "
+            "them stop acting."
+        )
+    unobserved = sorted(node.label for node in dag.nodes if node.measured and not node.observed)
+    if unobserved:
+        dag.notes.append("Measurable but not recorded on this day: " + ", ".join(unobserved) + ".")
     return dag
 
 
@@ -368,7 +448,10 @@ OBSERVED_BY_LANE = {
     "readiness": {"readiness"},
     "environment": {"light_evening", "light_morning", "room_temperature"},
     "temperature": {"skin_temperature"},
-    "presence": {"device_use", "time_away"},
+    "presence": {"time_away"},
+    "computer_use": {"computer_use"},
+    "phone_use": {"device_use"},
+    "tiktok": {"tiktok"},
     "location": {"location"},
 }
 

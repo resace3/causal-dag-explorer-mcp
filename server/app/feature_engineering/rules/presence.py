@@ -17,7 +17,10 @@ RULE_TRANSITION = "presence.arrival_departure"
 RULE_MOTION = "presence.motion_event"
 RULE_INACTIVITY = "presence.sustained_inactivity"
 RULE_DOOR = "presence.door_event"
-RULE_DEVICE_USE = "presence.device_use_session"
+# Screen-on stretches used to be drawn here as a thin bar under the motion
+# baseline. They have their own row now — see rules/phone_use.py — because a
+# signal buried in another lane cannot be reordered, hidden or lined up against
+# anything on its own.
 
 LANE = {
     "id": "presence",
@@ -48,11 +51,6 @@ def build_lane(context: RuleContext) -> Lane:
     if door_source and door_source not in sources:
         sources.append(door_source)
 
-    device_events, device_source = _device_use_events(context)
-    events.extend(device_events)
-    if device_source and device_source not in sources:
-        sources.append(device_source)
-
     events.extend(_inactivity_events(context))
 
     lane.events = sort_events(events)
@@ -65,7 +63,7 @@ def build_lane(context: RuleContext) -> Lane:
             )
         else:
             lane.unavailable_reason = (
-                "No presence or motion entities produced data yesterday. Add entity IDs "
+                "No presence or motion entities produced data on this day. Add entity IDs "
                 "under home_assistant.entities.presence and .motion in config.yaml."
             )
     return lane
@@ -314,80 +312,6 @@ def _door_events(context: RuleContext) -> tuple[list[TimelineEvent], str | None]
                     raw_record_ids=state.raw_record_ids,
                     entity_ids=[state.entity_id] if state.entity_id else [],
                     input_range=(state.start_time, state.end_time),
-                ),
-            )
-        )
-    return events, states[0].source
-
-
-def _device_use_events(context: RuleContext) -> tuple[list[TimelineEvent], str | None]:
-    """Screen-on stretches: evidence the user was awake and interacting."""
-    rule = context.config.device_use
-    states = [
-        state for state in context.normalized.states_for("device_use") if state.state == "on"
-    ]
-    if not states:
-        return [], None
-
-    merge_within = timedelta(minutes=rule.merge_within_minutes)
-    minimum = timedelta(minutes=rule.min_session_minutes)
-
-    merged: list[list] = []
-    for state in sorted(states, key=lambda item: item.start_time):
-        if merged and state.start_time - merged[-1][-1].end_time <= merge_within:
-            merged[-1].append(state)
-        else:
-            merged.append([state])
-
-    events: list[TimelineEvent] = []
-    for index, group in enumerate(merged):
-        clipped = context.clip_to_day(group[0].start_time, group[-1].end_time)
-        if clipped is None:
-            continue
-        start, end, before, after = clipped
-        if end - start < minimum:
-            continue
-        name = (group[0].device or group[0].entity_id or "device").replace("_", " ")
-        events.append(
-            TimelineEvent(
-                id=f"device_use_{index}_{int(start.timestamp())}",
-                phenotype="presence",
-                label="Device in use",
-                event_type="interval",
-                start_time=start,
-                end_time=end,
-                value=round((end - start).total_seconds() / 60, 1),
-                unit="min",
-                source=group[0].source,
-                entity_id=group[0].entity_id,
-                device=group[0].device,
-                measured_or_derived="derived",
-                confidence=0.7,
-                data_quality="medium",
-                category="device_use",
-                continues_before=before,
-                continues_after=after,
-                metadata={
-                    "device": name,
-                    "durationMinutes": round((end - start).total_seconds() / 60, 1),
-                    "sessionCount": len(group),
-                    "note": (
-                        "The device reported an interactive screen. Someone was using "
-                        "it; which person is not recorded."
-                    ),
-                },
-                provenance=build_provenance(
-                    rule=RULE_DEVICE_USE,
-                    version=rule.rule_version,
-                    raw_record_ids=[
-                        record_id for state in group for record_id in state.raw_record_ids
-                    ],
-                    entity_ids=[group[0].entity_id] if group[0].entity_id else [],
-                    thresholds={
-                        "merge_within_minutes": rule.merge_within_minutes,
-                        "min_session_minutes": rule.min_session_minutes,
-                    },
-                    input_range=(group[0].start_time, group[-1].end_time),
                 ),
             )
         )

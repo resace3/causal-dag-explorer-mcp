@@ -240,11 +240,11 @@ async def list_days() -> dict[str, Any]:
 
 @mcp.tool()
 async def get_expected_dag(
-    outcome: str,
+    outcome: str | None = None,
     exposure: str | None = None,
     date: str | None = None,
 ) -> dict[str, Any]:
-    """Build the expected causal graph for an outcome, as a hypothesis.
+    """Build the causal graph as a hypothesis: the whole model, or one question's part.
 
     This proposes structure; it never estimates an effect. Every edge is an
     assumption drawn from published physiology, and the response says so. Use it
@@ -259,11 +259,18 @@ async def get_expected_dag(
     the link was tested and rejected.
 
     Args:
-        outcome: Variable id to explain, e.g. "sleep_duration".
-        exposure: Optional variable id whose effect is in question.
+        outcome: Variable id to explain, e.g. "sleep_duration". Omit it for the
+            whole model — every variable and every arrow, which is what the DAG
+            tab shows. Roles, the adjustment set and the collider warnings only
+            appear once an outcome is named, because they are relations to a
+            question rather than properties of a variable.
+        exposure: Optional variable id whose effect is in question. Only
+            meaningful alongside an outcome.
         date: Which day's data availability to annotate against (YYYY-MM-DD).
     """
-    body: dict[str, Any] = {"outcome": outcome}
+    body: dict[str, Any] = {}
+    if outcome:
+        body["outcome"] = outcome
     if exposure:
         body["exposure"] = exposure
     if date:

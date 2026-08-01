@@ -24,6 +24,9 @@ mcp:
       # Or launch it explicitly:
       # command: uvx
       # args: ["--from", "git+https://github.com/Taxuspt/garmin_mcp", "garmin-mcp"]
+    activitywatch:
+      enabled: true
+      discover_from_client: true
 
 home_assistant:
   enabled: true
@@ -66,6 +69,13 @@ home_assistant:
     device_use:
       - binary_sensor.phone_interactive
 
+    # Sensors naming the app in front on a phone — the companion app's "Last
+    # used app" sensor, which reports Android package names. It holds its last
+    # value while the phone is asleep, so it is read only in combination with a
+    # `device_use` sensor and never alone.
+    app_usage:
+      - sensor.phone_last_used_app
+
     # Cumulative daily step counters. These reset to zero at midnight, and the
     # reset is detected rather than drawn as a huge negative step.
     steps:
@@ -87,6 +97,28 @@ home_assistant:
     # Reverse-geocoded place name for the same phone, shown at town level.
     place:
       - sensor.your_phone_geocoded_location
+
+# Computer use, read from a local ActivityWatch server. Events come over its
+# REST API on port 5600 — the same API the `activitywatch` MCP server wraps —
+# because that MCP formats its answers for a reader rather than for a program.
+# Set ACTIVITYWATCH_URL in .env if it does not listen on the default port.
+activitywatch:
+  enabled: true
+  mcp_server: activitywatch
+
+  # How much of each window and browser tab is kept:
+  #   app     - the application name only; browsing is not read at all
+  #   domain  - plus the site a tab was on, reduced to its domain (default)
+  #   full    - plus window titles and complete URLs
+  #
+  # Window titles quote document names, message subjects and search queries, so
+  # `full` stores things this app otherwise refuses to store. Anything the level
+  # does not permit is dropped in the connector and never reaches the database.
+  detail: domain
+
+  # Set when one ActivityWatch server collects several machines, so two
+  # computers' focus histories are never merged into one day.
+  # hostname: my-laptop
 
 wearable:
   # mock            - deterministic synthetic data, no credentials required
@@ -184,11 +216,42 @@ feature_engineering:
     active_steps_per_minute: 60
     min_active_minutes: 20
 
-  # Screen-on stretches, merged into sessions.
+  # Screen-on stretches, merged into sessions. The top tier of the Phone Use row.
   device_use:
     rule_version: "1.0.0"
     min_session_minutes: 2
     merge_within_minutes: 5
+
+  # Which app was in front, the second tier of the same row. Runs are cut to the
+  # screen-on windows before anything is drawn: Android reports the last app
+  # used indefinitely, so an unclipped run covers every hour the phone was down.
+  phone_app:
+    rule_version: "1.0.0"
+    min_app_minutes: 1
+    merge_within_minutes: 2
+
+  # One app followed on its own row, for lining up against sleep and light.
+  # Package names, not display names — TikTok ships under two of them. Point
+  # these at another package to follow a different app; the row's name lives in
+  # server/app/feature_engineering/rules/tiktok.py.
+  tiktok:
+    rule_version: "1.0.0"
+    packages:
+      - com.zhiliaoapp.musically
+      - com.ss.android.ugc.trill
+    min_minutes: 0.5
+    merge_within_minutes: 2
+
+  # ActivityWatch writes an event every time the focused window changes, so a
+  # working hour is hundreds of events. These decide what counts as one stretch
+  # at the machine, and what counts as one spell in an application. Time below
+  # a minimum is still inside the session totals — it is only drawn unnamed.
+  computer_use:
+    rule_version: "1.0.0"
+    min_session_minutes: 5
+    merge_within_minutes: 5
+    min_app_minutes: 3
+    min_site_minutes: 5
 
   # Phone location. Coordinates are never stored or displayed; this only
   # controls how much of the geocoded *name* is shown.
@@ -225,6 +288,12 @@ lanes:
   - id: environment
     visible: true
   - id: presence
+    visible: true
+  - id: computer_use
+    visible: true
+  - id: phone_use
+    visible: true
+  - id: tiktok
     visible: true
   - id: location
     visible: true

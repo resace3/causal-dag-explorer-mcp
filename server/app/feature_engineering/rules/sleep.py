@@ -130,7 +130,7 @@ def build_lane(context: RuleContext) -> Lane:
     lane.units = ["min"]
     if not events:
         lane.unavailable_reason = (
-            "No sleep records were available yesterday from the wearable provider "
+            "No sleep records were available for this day from the wearable provider "
             "or a bed-occupancy sensor."
         )
     return lane

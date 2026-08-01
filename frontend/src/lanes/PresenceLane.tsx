@@ -20,7 +20,6 @@ import {
 const BLOCK_TOP = 8;
 const BLOCK_HEIGHT = 24;
 const TRANSITION_Y = BLOCK_TOP + BLOCK_HEIGHT + 6;
-const DEVICE_USE_Y = TRANSITION_Y + 18;
 
 const PRESENCE_STYLES: Record<string, { fill: string; stroke: string; text: string }> = {
   presence_home: { fill: '#d8f4fb', stroke: '#a8e2f0', text: '#0e7490' },
@@ -50,7 +49,6 @@ export function PresenceLane({
   );
   const motion = lane.events.filter((event) => event.category === 'motion');
   const inactivity = lane.events.filter((event) => event.category === 'inactivity');
-  const deviceUse = lane.events.filter((event) => event.category === 'device_use');
   const doors = lane.events.filter((event) => event.category === 'door');
 
   return (
@@ -123,35 +121,6 @@ export function PresenceLane({
               rx={2}
               fill="#cbd5e1"
             />
-          </Mark>
-        );
-      })}
-
-      {/* Screen-on stretches: evidence the user was awake and interacting. */}
-      {deviceUse.map((event) => {
-        const x = scale.x(event.startTime);
-        const width = Math.max(scale.x(event.endTime ?? event.startTime) - x, 2.5);
-        const key = `event:${event.id}`;
-        const selected = selectedKey === key;
-        return (
-          <Mark
-            key={event.id}
-            id={event.id}
-            label={describeEvent(event, timeZone)}
-            selected={selected}
-            onSelect={() => onSelect({ kind: 'event', laneId: lane.id, event })}
-          >
-            <title>{eventTooltip(event, timeZone)}</title>
-            <rect
-              x={x}
-              y={DEVICE_USE_Y}
-              width={width}
-              height={selected ? 9 : 7}
-              rx={3.5}
-              fill="#6366f1"
-              opacity={selected ? 1 : 0.7}
-            />
-            <rect x={x - 3} y={DEVICE_USE_Y - 4} width={width + 6} height={15} fill="transparent" />
           </Mark>
         );
       })}
@@ -273,7 +242,6 @@ export function PresenceLane({
         const counts = [
           motion.length ? `${motion.length} motion reports` : null,
           doors.length ? `${doors.length} door openings` : null,
-          deviceUse.length ? `${deviceUse.length} device-use sessions` : null,
         ].filter(Boolean);
         return counts.length ? (
           <text x={6} y={motionBaseline + 12} fontSize={9.5} fill="#7c8a9c" pointerEvents="none">

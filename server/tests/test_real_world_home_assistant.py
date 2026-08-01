@@ -18,6 +18,7 @@ from app.config.schema import (
     WearableSleepEntities,
 )
 from app.config.settings import Settings
+from app.connectors.activitywatch.connector import ActivityWatchConnector
 from app.connectors.home_assistant.client import HomeAssistantClient
 from app.connectors.home_assistant.connector import HomeAssistantConnector
 from app.connectors.wearables.home_assistant_provider import HomeAssistantWearableProvider
@@ -374,6 +375,13 @@ async def test_a_person_and_its_device_tracker_do_not_draw_two_blocks(
                 example_config.home_assistant, settings, new_york, client=_client(payload)
             ),
             WearableConnector(MockWearableProvider(new_york, seed=42)),
+            # This test is about Home Assistant's presence entities. ActivityWatch
+            # is switched off so it never reaches for a real local server.
+            ActivityWatchConnector(
+                example_config.activitywatch.model_copy(update={"enabled": False}),
+                settings,
+                new_york,
+            ),
         )
 
     monkeypatch.setattr(service, "_connectors", connectors)

@@ -251,6 +251,64 @@ def _device_use_windows(
     return sorted(windows)
 
 
+#: Packages the mock phone moves between. Real Android package names, so the
+#: display-name lookup in rules/phone_use.py is exercised rather than bypassed.
+MOCK_APPS = (
+    "com.android.launcher3",
+    "com.whatsapp",
+    "com.android.chrome",
+    "com.google.android.apps.messaging",
+    "com.google.android.youtube",
+)
+
+MOCK_TRACKED_APP = "com.zhiliaoapp.musically"
+
+
+def _app_usage_series(
+    entity_id: str,
+    start: datetime,
+    end: datetime,
+    tz: ZoneInfo,
+    windows: list[tuple[datetime, datetime]],
+    rng: random.Random,
+) -> list[dict[str, Any]]:
+    """Which app was in front, changing only while the screen was on.
+
+    The value deliberately persists after a window closes, all the way to the
+    next one. That is exactly what the real sensor does, and it is why
+    rules/phone_use.py clips every run against the screen — a mock that tidily
+    reset to nothing overnight would never exercise the case that matters.
+    """
+    attributes = {"friendly_name": _friendly_name(entity_id)}
+    rows = [_state(entity_id, MOCK_APPS[0], start, attributes)]
+
+    for window_start, window_end in windows:
+        first = max(window_start, start)
+        last = min(window_end, end)
+        if first >= last:
+            continue
+        hour = first.astimezone(tz).hour
+        slices = rng.randint(1, 3)
+        step = (last - first) / slices
+        # The tracked app clusters in the evening, which is the shape the row
+        # exists to show against sleep onset.
+        tracked = (
+            rng.randrange(slices)
+            if rng.random() < (0.5 if 18 <= hour <= 23 else 0.12)
+            else None
+        )
+        for index in range(slices):
+            package = (
+                MOCK_TRACKED_APP
+                if index == tracked
+                else MOCK_APPS[rng.randrange(len(MOCK_APPS))]
+            )
+            rows.append(_state(entity_id, package, first + step * index, attributes))
+
+    rows.sort(key=lambda row: row["last_changed"])
+    return rows
+
+
 def _step_counter(
     entity_id: str,
     start: datetime,
@@ -388,6 +446,12 @@ def generate_history(
     plans = _plans(start, end, tz, seed)
     groups: list[list[dict[str, Any]]] = []
 
+    # One screen-on history for the whole phone, generated before the per-entity
+    # loop: the interactive sensor and the last-used-app sensor describe the same
+    # device, and drawing them from independent streams would produce a mock day
+    # where apps were open while the screen was off.
+    screen_windows = _device_use_windows(start, end, tz, plans, random.Random(seed * 7919 + 13))
+
     for index, entity_id in enumerate(entities.all_entity_ids()):
         rng = random.Random(seed * 977 + index * 31 + hash(entity_id) % 10_000)
         domain = entities.domain_for(entity_id)
@@ -435,10 +499,9 @@ def generate_history(
                 entity_id, start, end, "door", _door_windows(start, end, tz, plans, rng)
             )
         elif domain == "device_use":
-            rows = _binary_series(
-                entity_id, start, end, "connectivity",
-                _device_use_windows(start, end, tz, plans, rng),
-            )
+            rows = _binary_series(entity_id, start, end, "connectivity", screen_windows)
+        elif domain == "app_usage":
+            rows = _app_usage_series(entity_id, start, end, tz, screen_windows, rng)
         elif domain == "steps":
             rows = _step_counter(entity_id, start, end, tz, plans, rng)
         elif domain == "resting_heart_rate":

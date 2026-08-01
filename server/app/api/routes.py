@@ -264,20 +264,23 @@ async def dag_variables(sync: SyncDep, day: Annotated[str | None, Query()] = Non
     }
 
 
-@router.post("/dag", summary="Build an expected causal graph (a hypothesis, not an estimate)")
+@router.post("/dag", summary="Build a causal graph (a hypothesis, not an estimate)")
 async def causal_dag(
     sync: SyncDep,
-    outcome: Annotated[str, Body(embed=True)],
+    outcome: Annotated[str | None, Body(embed=True)] = None,
     exposure: Annotated[str | None, Body(embed=True)] = None,
     day: Annotated[str | None, Body(embed=True)] = None,
 ) -> dict[str, Any]:
+    """With no outcome, the whole model. With one, the part that question needs."""
     target = _parse_day(day, sync) if day else sync.yesterday().day
     timeline = sync.repository.get_timeline(target)
     available = {lane.id for lane in timeline.lanes if lane.available} if timeline else set()
 
     edges = effective_edges(sync.repository.get_edge_overrides())
     try:
-        dag = build_dag(outcome, exposure or None, observed_variables(available), edges=edges)
+        dag = build_dag(
+            outcome or None, exposure or None, observed_variables(available), edges=edges
+        )
     except ValueError as exc:
         raise ApiError(
             "invalid_causal_question",

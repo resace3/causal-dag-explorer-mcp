@@ -29,6 +29,9 @@ async def test_every_lane_is_present_and_ordered(timeline):
         "temperature",
         "environment",
         "presence",
+        "computer_use",
+        "phone_use",
+        "tiktok",
         "location",
     ]
 

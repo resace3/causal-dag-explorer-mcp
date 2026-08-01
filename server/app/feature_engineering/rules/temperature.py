@@ -60,7 +60,7 @@ def build_lane(context: RuleContext) -> Lane:
         if context.window.contains(sample.timestamp)
     ]
     if not samples:
-        lane.unavailable_reason = "No wearable temperature samples were recorded yesterday."
+        lane.unavailable_reason = "No wearable temperature samples were recorded on this day."
         return lane
 
     samples.sort(key=lambda sample: sample.timestamp)

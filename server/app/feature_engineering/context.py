@@ -53,6 +53,16 @@ class RuleContext:
     normalized: NormalizedRecords
     wearable: WearablePayload
     home_assistant_available: bool = True
+
+    activitywatch_available: bool = True
+    activitywatch_note: str | None = None
+    """Why ActivityWatch produced nothing, when it produced nothing.
+
+    "Switched off in the MCPs panel", "the server was not running" and "the day
+    predates the install" are three different facts, and a lane that showed one
+    message for all three would invite the wrong fix.
+    """
+
     baselines: dict[str, Baseline] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 

@@ -121,4 +121,23 @@ class SourceSelectionRow(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
 
 
+class KnownSourceRow(SQLModel, table=True):
+    """A source that already existed when the selection above was last made.
+
+    Without this, "absent from the selection" has two meanings that must not be
+    confused: switched off deliberately, and configured after the choice was
+    made. Treating the second as the first tells the user they switched
+    something off that they were never offered — which is what happened when
+    ActivityWatch was added to an install that already had a stored selection.
+
+    A separate table rather than a column, because this database has no
+    migrations: `create_all` adds a missing table but never a missing column.
+    """
+
+    __tablename__ = "known_sources"
+
+    id: str = Field(primary_key=True)
+    first_seen: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+
+
 Index("ix_raw_records_day_stream", RawRecordRow.day, RawRecordRow.stream)

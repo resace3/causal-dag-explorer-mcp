@@ -64,6 +64,65 @@ def test_a_source_no_longer_in_the_config_is_dropped_from_a_stored_selection(
     assert "a_source_that_left" not in sync_service.source_selection()
 
 
+def test_a_source_added_after_the_choice_joins_it_rather_than_reading_as_switched_off(
+    repository, sync_service
+):
+    """The case that made this necessary: connecting ActivityWatch to an
+    install that already had a stored selection. It was never on offer when the
+    choice was made, so reporting it "switched off in the MCPs panel" describes
+    a decision nobody took — and the newly connected source would show nothing
+    until the user found the switch."""
+    repository.set_source_selection(["home_assistant"], known=["home_assistant"])
+    selection = sync_service.source_selection()
+
+    assert "activitywatch" in selection
+    assert selection[-1] == "activitywatch", "a new source joins last, not first"
+
+
+def test_a_source_that_was_offered_and_left_out_stays_switched_off(repository, sync_service):
+    available = [item["id"] for item in sync_service.available_sources()]
+    keep = [source_id for source_id in available if source_id != "activitywatch"]
+    sync_service.set_source_selection(keep)
+
+    assert "activitywatch" not in sync_service.source_selection(), (
+        "a deliberate deselection must survive; otherwise the switch does nothing"
+    )
+
+
+def test_activitywatch_is_offered_and_switchable(sync_service):
+    assert "activitywatch" in [item["id"] for item in sync_service.available_sources()]
+    assert sync_service.activitywatch_selected() is True
+
+
+def test_a_source_that_is_not_a_wearable_leaves_the_merge_order_intact(sync_service):
+    """ActivityWatch supplies no body metric, so it belongs to no route.
+
+    Mapping it into the wearable route list would put a `None` in there and
+    every metric would then resolve against a route that does not exist.
+    """
+    sync_service.set_source_selection(
+        ["activitywatch", *(item["id"] for item in sync_service.available_sources()
+                            if item["id"] != "activitywatch")]
+    )
+    routes = sync_service._configured_for_selection().wearable.routes
+    assert None not in routes
+    assert routes, "the wearable routes must survive a non-wearable source being first"
+
+
+async def test_switching_activitywatch_off_leaves_its_lane_saying_so(sync_service):
+    others = [
+        item["id"] for item in sync_service.available_sources() if item["id"] != "activitywatch"
+    ]
+    sync_service.set_source_selection(others)
+    assert sync_service.activitywatch_selected() is False
+
+    timeline = await sync_service.sync(force_refresh=True)
+    lane = next(lane for lane in timeline.lanes if lane.id == "computer_use")
+    assert lane.available is False
+    assert "Switched off in the MCPs panel" in lane.unavailable_reason
+    assert not lane.events, "a source that was never contacted cannot have produced events"
+
+
 def test_changing_the_selection_rebuilds_the_cached_provider(sync_service):
     sync_service._provider = object()
     sync_service.set_source_selection([item["id"] for item in sync_service.available_sources()])

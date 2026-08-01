@@ -38,7 +38,7 @@ def build_lane(context: RuleContext) -> Lane:
         record for record in payload.readiness if context.window.contains(record.timestamp)
     ]
     if not records:
-        lane.unavailable_reason = "No readiness scores were available yesterday."
+        lane.unavailable_reason = "No readiness scores were available for this day."
         return lane
 
     records.sort(key=lambda record: record.timestamp)

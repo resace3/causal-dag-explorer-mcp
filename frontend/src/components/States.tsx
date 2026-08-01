@@ -19,7 +19,7 @@ export function TimelineSkeleton() {
           <div className="h-12 flex-1 rounded-lg bg-slate-50" />
         </div>
       ))}
-      <p className="sr-only">Loading yesterday&rsquo;s timeline…</p>
+      <p className="sr-only">Loading the day&rsquo;s timeline…</p>
     </div>
   );
 }
@@ -34,7 +34,7 @@ export function ErrorState({ error, onRetry }: { error: ApiError; onRetry: () =>
       <h2 className="text-[14px] font-semibold text-rose-900">
         {error.code === 'backend_unreachable'
           ? 'The local backend is not running'
-          : 'Yesterday could not be loaded'}
+          : 'This day could not be loaded'}
       </h2>
       <p className="mt-1.5 text-[12.5px] leading-relaxed text-rose-800">{error.message}</p>
       {error.hint ? <p className="mt-1 text-[12px] text-rose-700/80">{error.hint}</p> : null}

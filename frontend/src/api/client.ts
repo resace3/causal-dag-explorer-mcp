@@ -277,7 +277,8 @@ export const api = {
     request<{ date: string; variables: DagVariable[] }>(
       `/api/dag/variables${date ? `?day=${date}` : ''}`,
     ),
-  dag: (body: { outcome: string; exposure: string | null; day: string | null }) =>
+  /** No outcome asks for the whole model, which is what the DAG tab shows. */
+  dag: (body: { day: string | null; outcome?: string; exposure?: string | null }) =>
     request<DagResponse>('/api/dag', { method: 'POST', body: JSON.stringify(body) }),
   sourceSelection: () => request<SourceSelectionResponse>('/api/sources/selection'),
   setSourceSelection: (selected: string[]) =>

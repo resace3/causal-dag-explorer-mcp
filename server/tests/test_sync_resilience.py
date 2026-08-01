@@ -8,11 +8,25 @@ import httpx
 import pytest
 
 from app.config.settings import Settings, reset_settings_cache
+from app.connectors.activitywatch.connector import ActivityWatchConnector
 from app.connectors.home_assistant.client import HomeAssistantClient
 from app.connectors.home_assistant.connector import HomeAssistantConnector
 from app.connectors.wearables.base import BaseWearableProvider, WearableCapabilities
 from app.connectors.wearables.connector import WearableConnector
 from app.services.sync import SyncService
+
+
+def no_activitywatch(config, settings, tz) -> ActivityWatchConnector:
+    """A connector that is switched off in configuration.
+
+    These tests are about Home Assistant and the wearable failing. Leaving
+    ActivityWatch enabled would have them reach for a real server on port 5600,
+    which is present on a developer's machine and absent in CI — the same test
+    exercising two different code paths depending on where it runs.
+    """
+    return ActivityWatchConnector(
+        config.activitywatch.model_copy(update={"enabled": False}), settings, tz
+    )
 
 
 class _BrokenProvider(BaseWearableProvider):
@@ -61,7 +75,11 @@ async def test_home_assistant_offline_still_renders_wearable_lanes(
         )
         from app.connectors.wearables.mock import MockWearableProvider
 
-        return home_assistant, WearableConnector(MockWearableProvider(new_york, seed=42))
+        return (
+            home_assistant,
+            WearableConnector(MockWearableProvider(new_york, seed=42)),
+            no_activitywatch(example_config, settings, new_york),
+        )
 
     monkeypatch.setattr(service, "_connectors", connectors)
     timeline = await service.sync(force_refresh=True, now=fixed_now)
@@ -86,7 +104,11 @@ async def test_broken_wearable_provider_is_reported_not_raised(
         home_assistant = HomeAssistantConnector(
             example_config.home_assistant, service.settings, new_york
         )
-        return home_assistant, WearableConnector(_BrokenProvider())
+        return (
+            home_assistant,
+            WearableConnector(_BrokenProvider()),
+            no_activitywatch(example_config, service.settings, new_york),
+        )
 
     monkeypatch.setattr(service, "_connectors", connectors)
     timeline = await service.sync(force_refresh=True, now=fixed_now)
@@ -120,7 +142,11 @@ async def test_a_failing_metric_degrades_only_that_metric(
         home_assistant = HomeAssistantConnector(
             example_config.home_assistant, service.settings, new_york
         )
-        return home_assistant, WearableConnector(_PartialProvider())
+        return (
+            home_assistant,
+            WearableConnector(_PartialProvider()),
+            no_activitywatch(example_config, service.settings, new_york),
+        )
 
     monkeypatch.setattr(service, "_connectors", connectors)
     timeline = await service.sync(force_refresh=True, now=fixed_now)

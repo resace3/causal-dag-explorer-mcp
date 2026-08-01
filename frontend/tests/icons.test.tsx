@@ -23,6 +23,8 @@ const VARIABLES = [
   'room_temperature',
   'skin_temperature',
   'device_use',
+  'tiktok',
+  'computer_use',
   'time_away',
   'location',
   'day_of_week',

@@ -2,14 +2,21 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Timeline } from '../src/timeline/Timeline';
-import { CollapsedTimeline, majorEvents } from '../src/timeline/CollapsedTimeline';
+import {
+  CollapsedTimeline,
+  collapsedEvents,
+  majorEvents,
+  majorLaneIds,
+  togglablePhenotypes,
+  visibleLaneIds,
+} from '../src/timeline/CollapsedTimeline';
 import { DetailsPanel } from '../src/details/DetailsPanel';
 import { TimelineControls } from '../src/components/TimelineControls';
 import { Sidebar } from '../src/components/Sidebar';
 import { PageHeader } from '../src/components/PageHeader';
 import { SourceNotices, TimelineSkeleton } from '../src/components/States';
 import { makeEvent, makeLane, makeSeries, makeTimeline } from './fixtures';
-import type { DayTimeline, Selection } from '../src/types/timeline';
+import type { DayTimeline, Lane, Selection } from '../src/types/timeline';
 
 const DAY_PROPS = {
   selectedDate: '2025-06-10',
@@ -239,6 +246,140 @@ describe('collapsed timeline', () => {
     expect(majorEvents(lanes)).toHaveLength(0);
   });
 
+  /**
+   * Anything on the Expanded tab has to be reachable here. A lane whose events
+   * are none of the curated "major" categories — computer use, environment —
+   * could previously not be shown on this line at all, not even by asking.
+   */
+  describe('showing anything the expanded tab has', () => {
+    const computerUse = makeLane({
+      id: 'computer_use',
+      phenotype: 'computer_use',
+      label: 'Computer Use',
+      accent: 'amber',
+      events: [
+        makeEvent({ id: 'cu1', category: 'at_computer', label: 'At the computer · 46m' }),
+        makeEvent({ id: 'cu2', category: 'app_session', label: 'Chrome' }),
+      ],
+    });
+
+    const dayOf = (...lanes: Lane[]) => [
+      {
+        date: '2025-06-10',
+        timeline: makeTimeline({ lanes }),
+        status: 'loaded' as const,
+        stored: true,
+      },
+    ];
+
+    it('offers every lane with data as a toggle, not only the curated ones', () => {
+      expect(togglablePhenotypes(dayOf(makeLane(), computerUse)).map((lane) => lane.id)).toEqual([
+        'activity',
+        'computer_use',
+      ]);
+    });
+
+    it('does not offer a lane the expanded tab is hiding', () => {
+      // Removed is removed. A switch here for a row taken off the timeline
+      // would offer to restore something already declined.
+      const days = dayOf(makeLane(), computerUse);
+      expect(togglablePhenotypes(days, new Set(['activity'])).map((lane) => lane.id)).toEqual([
+        'computer_use',
+      ]);
+    });
+
+    it('starts a lane with no major events switched off', () => {
+      const days = dayOf(makeLane(), computerUse);
+      const visible = visibleLaneIds(
+        togglablePhenotypes(days),
+        new Set(),
+        new Set(),
+        majorLaneIds(days),
+      );
+      expect(visible.has('activity')).toBe(true);
+      expect(visible.has('computer_use')).toBe(false);
+    });
+
+    it('shows all of a lane that defines no major events once it is switched on', () => {
+      const days = dayOf(makeLane(), computerUse);
+      const curated = majorLaneIds(days);
+      const visible = visibleLaneIds(
+        togglablePhenotypes(days),
+        new Set(),
+        new Set(['computer_use']),
+        curated,
+      );
+      const items = collapsedEvents([makeLane(), computerUse], visible, curated);
+      // Curated for activity, everything for computer use — otherwise switching
+      // it on would show nothing and look broken.
+      expect(items.map((item) => item.event.id).sort()).toEqual([
+        'activity_morning',
+        'cu1',
+        'cu2',
+      ]);
+    });
+
+    it('drops the curation entirely when every event is asked for', () => {
+      const busy = makeLane({
+        events: [
+          makeEvent({ id: 'a', category: 'strength_training' }),
+          makeEvent({ id: 'b', category: 'motion' }),
+        ],
+      });
+      const days = dayOf(busy);
+      const curated = majorLaneIds(days);
+      const visible = visibleLaneIds(togglablePhenotypes(days), new Set(), new Set(), curated);
+      expect(collapsedEvents([busy], visible, curated).map((item) => item.event.id)).toEqual([
+        'a',
+      ]);
+      expect(
+        collapsedEvents([busy], visible, curated, true).map((item) => item.event.id),
+      ).toEqual(['a', 'b']);
+    });
+
+    /**
+     * A lane's default and its curation must not depend on which day's copy
+     * happened to load first: Presence & Motion carries an arrival on some days
+     * and none on others, and it cannot appear on Tuesday and vanish on
+     * Wednesday for reasons nothing on screen explains.
+     */
+    it('decides curation across the whole window, not per day', () => {
+      const withArrival = makeLane({
+        id: 'presence',
+        label: 'Presence & Motion',
+        events: [makeEvent({ id: 'p1', category: 'arrived_home' })],
+      });
+      const withoutArrival = makeLane({
+        id: 'presence',
+        label: 'Presence & Motion',
+        events: [makeEvent({ id: 'p2', category: 'motion' })],
+      });
+      const days = [
+        { date: '2025-06-09', timeline: makeTimeline({ lanes: [withoutArrival] }), status: 'loaded' as const, stored: true },
+        { date: '2025-06-10', timeline: makeTimeline({ lanes: [withArrival] }), status: 'loaded' as const, stored: true },
+      ];
+      const curated = majorLaneIds(days);
+      expect(curated.has('presence')).toBe(true);
+
+      // On the quiet day the lane is still curated, so it stays quiet rather
+      // than flooding that panel with every motion tick.
+      const visible = visibleLaneIds(togglablePhenotypes(days), new Set(), new Set(), curated);
+      expect(collapsedEvents([withoutArrival], visible, curated)).toHaveLength(0);
+      expect(collapsedEvents([withArrival], visible, curated)).toHaveLength(1);
+    });
+
+    it('keeps an explicit choice even when it matches the default', () => {
+      // Storing only the off-list would turn a deliberately-off lane back on
+      // the moment its default changed.
+      expect(
+        visibleLaneIds([makeLane()], new Set(['activity']), new Set(), new Set(['activity'])).size,
+      ).toBe(0);
+      expect(
+        visibleLaneIds([computerUse], new Set(), new Set(['computer_use']), new Set()).size,
+      ).toBe(1);
+    });
+  });
+
   const asRange = (timeline: DayTimeline) => [
     { date: timeline.date, timeline, status: 'loaded' as const, stored: true },
   ];
@@ -250,7 +391,11 @@ describe('collapsed timeline', () => {
         days={asRange(timeline)}
         focusDate={timeline.date}
         hidden={new Set()}
+        excluded={new Set()}
+        shown={new Set()}
         onTogglePhenotype={vi.fn()}
+        allEvents={false}
+        onToggleAllEvents={vi.fn()}
         selectedKey={null}
         onSelect={vi.fn()}
         zoom={1}
@@ -274,7 +419,11 @@ describe('collapsed timeline', () => {
         days={asRange(timeline)}
         focusDate={timeline.date}
         hidden={new Set()}
+        excluded={new Set()}
+        shown={new Set()}
         onTogglePhenotype={vi.fn()}
+        allEvents={false}
+        onToggleAllEvents={vi.fn()}
         selectedKey={null}
         onSelect={vi.fn()}
         zoom={1}
@@ -288,7 +437,11 @@ describe('collapsed timeline', () => {
         days={asRange(timeline)}
         focusDate={timeline.date}
         hidden={new Set(['activity'])}
+        excluded={new Set()}
+        shown={new Set()}
         onTogglePhenotype={vi.fn()}
+        allEvents={false}
+        onToggleAllEvents={vi.fn()}
         selectedKey={null}
         onSelect={vi.fn()}
         zoom={1}
@@ -314,7 +467,11 @@ describe('collapsed timeline', () => {
         ]}
         focusDate={timeline.date}
         hidden={new Set()}
+        excluded={new Set()}
+        shown={new Set()}
         onTogglePhenotype={vi.fn()}
+        allEvents={false}
+        onToggleAllEvents={vi.fn()}
         selectedKey={null}
         onSelect={vi.fn()}
         zoom={1}
@@ -401,7 +558,11 @@ describe('collapsed timeline', () => {
           days={nightAcrossMidnight()}
           focusDate="2025-06-11"
           hidden={new Set()}
-          onTogglePhenotype={vi.fn()}
+          excluded={new Set()}
+        shown={new Set()}
+        onTogglePhenotype={vi.fn()}
+        allEvents={false}
+        onToggleAllEvents={vi.fn()}
           selectedKey={null}
           onSelect={vi.fn()}
           zoom={1}
@@ -460,7 +621,11 @@ describe('collapsed timeline', () => {
           days={nightAcrossMidnight().slice(1)}
           focusDate="2025-06-11"
           hidden={new Set()}
-          onTogglePhenotype={vi.fn()}
+          excluded={new Set()}
+        shown={new Set()}
+        onTogglePhenotype={vi.fn()}
+        allEvents={false}
+        onToggleAllEvents={vi.fn()}
           selectedKey={null}
           onSelect={vi.fn()}
           zoom={1}
@@ -478,7 +643,11 @@ describe('collapsed timeline', () => {
         days={[{ date: '2026-07-01', timeline: null, status: 'unfetched', stored: false }, ...asRange(timeline)]}
         focusDate={timeline.date}
         hidden={new Set()}
+        excluded={new Set()}
+        shown={new Set()}
         onTogglePhenotype={vi.fn()}
+        allEvents={false}
+        onToggleAllEvents={vi.fn()}
         selectedKey={null}
         onSelect={vi.fn()}
         zoom={1}
@@ -617,9 +786,9 @@ describe('controls', () => {
     await userEvent.click(screen.getByTestId('stream-visibility-toggle'));
     const popover = screen.getByTestId('stream-visibility-popover');
     expect(within(popover).getByText('Activity')).toBeInTheDocument();
-    expect(within(popover).getByText('No data yesterday')).toBeInTheDocument();
+    expect(within(popover).getByText('No data this day')).toBeInTheDocument();
     expect(
-      within(popover).getByText(/No HRV data was available yesterday/),
+      within(popover).getByText(/No HRV data was available for this day/),
     ).toBeInTheDocument();
   });
 
@@ -644,12 +813,12 @@ describe('controls', () => {
 });
 
 describe('page chrome', () => {
-  it('shows Yesterday as the only navigation item', () => {
+  it('shows Today as the only navigation item', () => {
     render(<Sidebar sources={null} lastSync={null} {...DAY_PROPS} />);
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
-    // One item, which now also acts as "jump back to yesterday".
+    // One item, which is also the way back to the day the page opens on.
     expect(within(nav).getAllByRole('button')).toHaveLength(1);
-    expect(within(nav).getByText('Yesterday')).toBeInTheDocument();
+    expect(within(nav).getByText('Today')).toBeInTheDocument();
     for (const forbidden of ['Home', 'Trends', 'Insights', 'Settings']) {
       expect(within(nav).queryByText(forbidden)).not.toBeInTheDocument();
     }
@@ -759,7 +928,7 @@ describe('page chrome', () => {
     expect(screen.queryByText('Wearables')).not.toBeInTheDocument();
 
     // A source that answered but had nothing says so rather than looking broken.
-    expect(screen.getByText(/no data yesterday/)).toBeInTheDocument();
+    expect(screen.getByText(/no data this day/)).toBeInTheDocument();
   });
 
   it('renders each source with a status label, not colour alone', () => {

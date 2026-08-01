@@ -1,4 +1,4 @@
-"""MCP tools return valid structured responses.
+﻿"""MCP tools return valid structured responses.
 
 The HTTP layer is stubbed so the tools can be exercised without spawning real
 servers; `process.ensure_backend` is patched to a no-op for the same reason.
@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import routes
+from app.feature_engineering.pipeline import RULES
 from app.main import create_app
 from app.mcp import server as mcp_server
 
@@ -117,7 +118,10 @@ async def test_get_data_sources_shape(stub_backend):
 async def test_get_yesterday_timeline_summary_is_compact(stub_backend):
     result = await mcp_server.get_yesterday_timeline()
     assert result["date"]
-    assert len(result["lanes"]) == 9
+    # Counted against the pipeline rather than a literal: a summary that
+    # silently dropped a lane is the failure worth catching, not the arrival
+    # of a new one.
+    assert len(result["lanes"]) == len(RULES)
     assert all("eventCount" in lane for lane in result["lanes"])
     # A summary must not carry the full sample payload.
     assert "events" not in result["lanes"][0]
@@ -151,7 +155,7 @@ async def test_a_specific_day_can_be_requested(stub_backend):
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     result = await mcp_server.get_day_timeline(yesterday)
     assert result["date"]
-    assert len(result["lanes"]) == 9
+    assert len(result["lanes"]) == len(RULES)
 
 
 async def test_a_future_day_is_refused(stub_backend):

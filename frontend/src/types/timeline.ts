@@ -80,7 +80,10 @@ export type AccentToken =
   | 'orange'
   | 'teal'
   | 'sky'
-  | 'cyan';
+  | 'cyan'
+  | 'amber'
+  | 'fuchsia'
+  | 'rose';
 
 export interface Lane {
   id: string;
@@ -206,6 +209,15 @@ export interface EventSelection {
   kind: 'event';
   laneId: string;
   event: TimelineEvent;
+  /**
+   * The day this mark belongs to, when it is not the day on screen.
+   *
+   * The collapsed view spans two months, so a mark there can belong to any of
+   * them. Without this the page re-resolves every selection against the day it
+   * is displaying, fails to find one from a neighbouring day, and closes the
+   * panel again the instant it opens.
+   */
+  date?: string;
 }
 
 export type Selection = EventSelection | SeriesSelection;

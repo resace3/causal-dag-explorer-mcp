@@ -126,7 +126,7 @@ export function makeTimeline(overrides: Partial<DayTimeline> = {}): DayTimeline 
       description: 'Nightly beat-to-beat variation',
       accent: 'indigo',
       available: false,
-      unavailableReason: 'No HRV data was available yesterday.',
+      unavailableReason: 'No HRV data was available for this day.',
       events: [],
       series: [],
     }),

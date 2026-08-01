@@ -3,10 +3,12 @@ import type { DayScale } from '../timeline/scale';
 import type { Lane, Selection } from '../types/timeline';
 import { accentTheme, laneHeight } from '../utilities/lanes';
 import { ActivityLane } from './ActivityLane';
+import { ComputerUseLane } from './ComputerUseLane';
 import { ContinuousLane } from './ContinuousLane';
 import { EnvironmentLane } from './EnvironmentLane';
 import { EventLane } from './EventLane';
 import { LocationLane } from './LocationLane';
+import { PhoneUseLane } from './PhoneUseLane';
 import { PresenceLane } from './PresenceLane';
 import { laneAriaLabel, type LaneRenderProps } from './shared';
 
@@ -15,6 +17,10 @@ function renderer(lane: Lane): (props: LaneRenderProps) => JSX.Element {
   if (lane.id === 'environment') return EnvironmentLane;
   if (lane.id === 'presence') return PresenceLane;
   if (lane.id === 'location') return LocationLane;
+  // Three tiers that read as one column: at the machine, in what, on which site.
+  if (lane.id === 'computer_use') return ComputerUseLane;
+  // The same idea with two tiers: screen on, and which app was in front.
+  if (lane.id === 'phone_use') return PhoneUseLane;
   // Activity keeps named sessions in front of a step-rate context line.
   if (lane.id === 'activity') return ActivityLane;
   if (lane.series.length > 0) return ContinuousLane;

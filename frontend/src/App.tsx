@@ -4,7 +4,7 @@ import { DetailsPanel } from './details/DetailsPanel';
 import { PageHeader } from './components/PageHeader';
 import { Sidebar } from './components/Sidebar';
 import { ErrorState, SourceNotices, TimelineSkeleton } from './components/States';
-import { TimelineControls, type ViewMode } from './components/TimelineControls';
+import { TimelineControls, isViewMode, type ViewMode } from './components/TimelineControls';
 import { useDataSources } from './hooks/useDataSources';
 import { datesAround, useDayRange } from './hooks/useDayRange';
 import { isStringArray, usePersistentState } from './hooks/usePersistentState';
@@ -23,13 +23,37 @@ export function App() {
   const { index: dayIndex, today, yesterday } = useDays(timeline?.generatedAt);
   const { report: sources, state: sourcesState } = useDataSources(timeline?.generatedAt);
 
-  // The backend decides which day "yesterday" is, using the configured
-  // timezone. Waiting for it avoids the browser picking a different day.
+  // The page opens on the day in progress. The backend decides which day that
+  // is, using the configured timezone — waiting for it avoids the browser
+  // picking a different day from the server across midnight or a DST change.
+  //
+  // Today is incomplete by definition, and the header says so rather than
+  // presenting a part-day as a finished one. A day still running is served
+  // from cache and never re-fetched by the poll, so opening the page does not
+  // spawn an MCP subprocess every minute; Refresh is how you ask for the
+  // hours since the last sync.
   useEffect(() => {
-    if (selectedDate === null && yesterday) setSelectedDate(yesterday);
-  }, [selectedDate, yesterday]);
-  const [mode, setMode] = useState<ViewMode>('expanded');
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+    if (selectedDate === null && today) setSelectedDate(today);
+  }, [selectedDate, today]);
+  // Which tab you were on is part of the same arrangement as the row order and
+  // what you hid: coming back to Expanded after every reload undoes a choice
+  // you made on purpose.
+  const [mode, setMode] = usePersistentState<ViewMode>('view-mode', 'expanded', isViewMode);
+  /**
+   * Rows hidden from the expanded timeline.
+   *
+   * Persisted for the same reason the row order is: it is an arrangement of
+   * your own view, not something derived from the data, and a view that forgot
+   * it on every reload — or in the next tab — would make the control not worth
+   * using. Stored as lane ids, so a lane that disappears on a day with no data
+   * for it comes back still hidden, and one you have never hidden is visible.
+   */
+  const [hiddenIds, setHiddenIds] = usePersistentState<string[]>(
+    'hidden-lanes',
+    [],
+    isStringArray,
+  );
+  const hidden = useMemo(() => new Set(hiddenIds), [hiddenIds]);
   const [zoom, setZoom] = useState(1);
   const [selection, setSelection] = useState<Selection | null>(null);
   // Row order is the user's own arrangement of their view, so it outlives the
@@ -39,22 +63,42 @@ export function App() {
     [],
     isStringArray,
   );
-  // Which phenotypes the collapsed view leaves out, and how many days it spans.
+  /**
+   * Which lanes the collapsed view draws. Two lists rather than one, because
+   * "not in the shown list" has to mean two different things: a lane switched
+   * off, and a lane whose default is off because it carries no major events.
+   * Storing only the off list would turn every newly connected source on.
+   */
   const [collapsedHiddenIds, setCollapsedHiddenIds] = usePersistentState<string[]>(
     'collapsed-hidden',
     [],
     isStringArray,
   );
+  const [collapsedShownIds, setCollapsedShownIds] = usePersistentState<string[]>(
+    'collapsed-shown',
+    [],
+    isStringArray,
+  );
+  // Off by default: the collapsed line is meant to be readable at a glance.
+  const [collapsedAllEvents, setCollapsedAllEvents] = usePersistentState<boolean>(
+    'collapsed-all-events',
+    false,
+    (value): value is boolean => typeof value === 'boolean',
+  );
   const collapsedHidden = useMemo(() => new Set(collapsedHiddenIds), [collapsedHiddenIds]);
+  const collapsedShown = useMemo(() => new Set(collapsedShownIds), [collapsedShownIds]);
   const toggleCollapsedPhenotype = useCallback(
-    (laneId: string) => {
+    (laneId: string, on: boolean) => {
+      // Every toggle is recorded explicitly, so the choice survives a lane's
+      // default changing when a day with different data is loaded.
+      setCollapsedShownIds((current) =>
+        on ? [...new Set([...current, laneId])] : current.filter((id) => id !== laneId),
+      );
       setCollapsedHiddenIds((current) =>
-        current.includes(laneId)
-          ? current.filter((id) => id !== laneId)
-          : [...current, laneId],
+        on ? current.filter((id) => id !== laneId) : [...new Set([...current, laneId])],
       );
     },
-    [setCollapsedHiddenIds],
+    [setCollapsedHiddenIds, setCollapsedShownIds],
   );
 
   /**
@@ -100,6 +144,25 @@ export function App() {
     [availableLanes, hidden],
   );
 
+  /**
+   * Exactly the rows the Expanded tab is drawing, in that order.
+   *
+   * The DAG tab takes its rows from this and nothing else, so the two tabs
+   * cannot disagree about which streams this day has: hide a row and its
+   * variables leave the graph, and a lane with no data today never reaches it
+   * to begin with.
+   */
+  const timelineLanes = useMemo(
+    () =>
+      visibleLanes.map(({ id, label, description, accent }) => ({
+        id,
+        label,
+        description,
+        accent,
+      })),
+    [visibleLanes],
+  );
+
   /** Move one lane to where another currently sits, and remember it. */
   const reorderLanes = useCallback(
     (laneId: string, beforeLaneId: string) => {
@@ -127,6 +190,11 @@ export function App() {
    */
   useEffect(() => {
     if (!current || !selection) return;
+    // A mark picked in the collapsed view can belong to any day in the window.
+    // Re-resolving it against the day on screen would fail to find it and shut
+    // the panel, which is why clicking anything but the focused day's marks
+    // used to do nothing at all.
+    if (selection.kind === 'event' && selection.date && selection.date !== current.date) return;
     if (selection.kind === 'event') {
       const lane = current.lanes.find((item) => item.id === selection.laneId);
       const event = lane?.events.find((item) => item.id === selection.event.id);
@@ -158,14 +226,16 @@ export function App() {
     [reload],
   );
 
-  const toggleLane = useCallback((laneId: string) => {
-    setHidden((current) => {
-      const next = new Set(current);
-      if (next.has(laneId)) next.delete(laneId);
-      else next.add(laneId);
-      return next;
-    });
-  }, []);
+  const toggleLane = useCallback(
+    (laneId: string) => {
+      setHiddenIds((current) =>
+        current.includes(laneId)
+          ? current.filter((id) => id !== laneId)
+          : [...current, laneId],
+      );
+    },
+    [setHiddenIds],
+  );
 
   const selectedKey = selection ? selectionKey(selection) : null;
   const accent =
@@ -179,7 +249,6 @@ export function App() {
         state={sourcesState}
         lastSync={lastSync}
         selectedDate={selectedDate}
-        yesterday={yesterday}
         today={today}
         dayIndex={dayIndex}
         onSelectDate={setSelectedDate}
@@ -208,7 +277,7 @@ export function App() {
         <div className="flex min-h-0 flex-1 flex-col px-8 pb-8 lg:flex-row lg:gap-5">
           <section
             className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white"
-            aria-label="Yesterday timeline"
+            aria-label="Day timeline"
           >
             {state === 'error' && error ? (
               <ErrorState error={error} onRetry={reload} />
@@ -231,11 +300,11 @@ export function App() {
                 />
 
                 {mode === 'dag' ? (
-                  <DagView date={selectedDate} />
+                  <DagView date={selectedDate} lanes={timelineLanes} />
                 ) : visibleLanes.length === 0 ? (
                   <p className="px-5 py-10 text-center text-[13px] text-slate-500">
                     {availableLanes.length === 0
-                      ? 'No data source returned usable data for yesterday. Check the Data Sources panel.'
+                      ? 'No data source returned usable data for this day. Check the Data Sources panel.'
                       : 'Every available data stream is hidden. Re-enable one from “Visible data streams”.'}
                   </p>
                 ) : mode === 'expanded' ? (
@@ -256,7 +325,11 @@ export function App() {
                     days={rangeDays}
                     focusDate={selectedDate}
                     hidden={collapsedHidden}
+                    excluded={hidden}
+                    shown={collapsedShown}
                     onTogglePhenotype={toggleCollapsedPhenotype}
+                    allEvents={collapsedAllEvents}
+                    onToggleAllEvents={() => setCollapsedAllEvents((value) => !value)}
                     selectedKey={selectedKey}
                     onSelect={setSelection}
                     zoom={zoom}
@@ -279,6 +352,7 @@ export function App() {
               selection={selection}
               accent={accent}
               timeZone={current?.localTimezone ?? 'UTC'}
+              displayedDate={selectedDate}
               onClose={() => setSelection(null)}
             />
           ) : null}

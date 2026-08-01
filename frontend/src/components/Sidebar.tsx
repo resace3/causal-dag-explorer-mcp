@@ -1,6 +1,7 @@
 /**
- * Narrow, quiet sidebar. Yesterday is the only navigation item — there is
- * nowhere else to go, by design.
+ * Narrow, quiet sidebar. Today is the only navigation item — there is nowhere
+ * else to go, by design. It names the day the page opens on, so it is the way
+ * back from any other day the calendar took you to.
  */
 
 import { Calendar } from './Calendar';
@@ -60,7 +61,7 @@ function SourceRow({ source }: { source: DataSource }) {
               aria-hidden
             />
             {STATUS_LABELS[source.status] ?? source.status}
-            {idle ? ' · no data yesterday' : ''}
+            {idle ? ' · no data this day' : ''}
           </span>
         </span>
       </div>
@@ -94,7 +95,6 @@ interface SidebarProps {
   state?: 'checking' | 'ready' | 'unavailable';
   lastSync: string | null | undefined;
   selectedDate: string | null;
-  yesterday: string | null;
   today: string | null;
   dayIndex: Map<string, DayIndex>;
   onSelectDate: (date: string) => void;
@@ -109,13 +109,12 @@ export function Sidebar({
   state = 'ready',
   lastSync,
   selectedDate,
-  yesterday,
   today,
   dayIndex,
   onSelectDate,
   loadingDay,
 }: SidebarProps) {
-  const onYesterday = selectedDate !== null && selectedDate === yesterday;
+  const onToday = selectedDate !== null && selectedDate === today;
   return (
     <aside
       className="flex w-[228px] shrink-0 flex-col border-r border-slate-200 bg-white px-4 py-6"
@@ -126,17 +125,17 @@ export function Sidebar({
           <li>
             <button
               type="button"
-              aria-current={onYesterday ? 'page' : undefined}
-              data-testid="nav-yesterday"
-              onClick={() => yesterday && onSelectDate(yesterday)}
+              aria-current={onToday ? 'page' : undefined}
+              data-testid="nav-today"
+              onClick={() => today && onSelectDate(today)}
               className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-semibold transition ${
-                onYesterday
+                onToday
                   ? 'bg-blue-50 text-blue-700'
                   : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800'
               }`}
             >
               <PulseIcon size={19} />
-              Yesterday
+              Today
             </button>
           </li>
         </ul>

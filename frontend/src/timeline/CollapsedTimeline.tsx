@@ -27,6 +27,17 @@ const HEIGHT = 250;
 const BASELINE = 132;
 const MIN_DAY_WIDTH = 520;
 
+/**
+ * Half the width of a mark's caption, for its hit area.
+ *
+ * Floored so that a one-word label still gets a target worth aiming at, and
+ * measured from the label alone: the time range under it is narrower, so the
+ * wider of the two is what the block occupies.
+ */
+function labelHalfWidth(label: string): number {
+  return Math.max(approximateTextWidth(label, 11.5), 56) / 2;
+}
+
 export interface MajorEvent {
   event: TimelineEvent;
   lane: Lane;
@@ -51,23 +62,136 @@ export function majorEvents(lanes: Lane[], hidden: Set<string> = new Set()): Maj
   );
 }
 
-/** Lanes that contribute at least one major event, for the toggle row. */
-export function togglablePhenotypes(days: RangeDay[]): Lane[] {
+/** True when a lane has anything in the curated major-event list. */
+export function definesMajorEvents(lane: Lane): boolean {
+  return lane.events.some((event) => event.category && MAJOR_CATEGORIES.has(event.category));
+}
+
+/**
+ * Lanes that carry a major event *anywhere in the window*.
+ *
+ * Deliberately not per-day. Whether a lane is curated down to its major events
+ * decides both its default and what it draws, and answering that from whichever
+ * day happened to load first makes Presence & Motion appear on Tuesday and
+ * vanish on Wednesday — the same lane behaving two ways for no reason the
+ * reader can see.
+ */
+export function majorLaneIds(days: RangeDay[]): Set<string> {
+  const ids = new Set<string>();
+  for (const day of days) {
+    for (const lane of day.timeline?.lanes ?? []) {
+      if (lane.available && definesMajorEvents(lane)) ids.add(lane.id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * What the collapsed line actually draws.
+ *
+ * Two rules, because "major" is a curated list of categories and not every lane
+ * has one:
+ *
+ *  * A lane that defines major events contributes those.
+ *  * A lane that defines none contributes everything it recorded — otherwise
+ *    switching it on would do nothing at all, and some lanes (computer use,
+ *    environment, HRV) could never be shown here.
+ *
+ * `allEvents` drops the curation entirely, so anything on the Expanded tab can
+ * be brought onto this one.
+ */
+export function collapsedEvents(
+  lanes: Lane[],
+  visible: Set<string>,
+  curatedLanes: Set<string> = new Set(),
+  allEvents = false,
+): MajorEvent[] {
+  const chosen: MajorEvent[] = [];
+  for (const lane of lanes) {
+    if (!lane.available || !visible.has(lane.id)) continue;
+    const curated = !allEvents && curatedLanes.has(lane.id);
+    for (const event of lane.events) {
+      if (curated) {
+        if (!event.category || !MAJOR_CATEGORIES.has(event.category)) continue;
+        if (
+          event.category === 'elevated' &&
+          chosen.some((item) => item.event.category === 'elevated')
+        ) {
+          continue;
+        }
+      }
+      chosen.push({ event, lane });
+    }
+  }
+  return chosen.sort(
+    (a, b) => new Date(a.event.startTime).getTime() - new Date(b.event.startTime).getTime(),
+  );
+}
+
+/**
+ * Every lane with events anywhere in the window, so nothing on the Expanded tab
+ * is missing from this list. Earlier this offered only lanes with a *major*
+ * event, which meant a lane like Computer Use could not be shown here at all.
+ *
+ * Events, not lanes: a lane holding only a continuous series — a heart-rate
+ * trace with no discrete readings — has nothing this view can draw. One line of
+ * marks cannot carry a curve, and picking a moment out of one to stand for it
+ * would be inventing salience, which is the same reason the DAG tab refuses to
+ * give a continuous signal a node. Such a lane is left out rather than offered
+ * as a switch that does nothing.
+ */
+export function togglablePhenotypes(days: RangeDay[], excluded: Set<string> = new Set()): Lane[] {
   const seen = new Map<string, Lane>();
   for (const day of days) {
-    for (const { lane } of majorEvents(day.timeline?.lanes ?? [])) {
+    for (const lane of day.timeline?.lanes ?? []) {
+      if (!lane.available || !lane.events.length) continue;
+      // Removed from the Expanded tab means removed, not "removed over there".
+      // A switch here for a row the user took off their timeline would offer
+      // to bring back something they have already said they do not want.
+      if (excluded.has(lane.id)) continue;
       if (!seen.has(lane.id)) seen.set(lane.id, lane);
     }
   }
   return [...seen.values()];
 }
 
+/**
+ * Which lanes the collapsed line shows: the ones that carry the day's major
+ * events, plus or minus what the user has said explicitly.
+ *
+ * A lane with no major events starts off rather than on, so switching a new
+ * source on does not quietly triple the number of marks on a line whose whole
+ * point is that it is short.
+ */
+export function visibleLaneIds(
+  lanes: Lane[],
+  hidden: Set<string>,
+  shown: Set<string>,
+  curatedLanes: Set<string> = new Set(),
+): Set<string> {
+  const visible = new Set<string>();
+  for (const lane of lanes) {
+    if (shown.has(lane.id)) visible.add(lane.id);
+    else if (!hidden.has(lane.id) && curatedLanes.has(lane.id)) visible.add(lane.id);
+  }
+  return visible;
+}
+
 interface CollapsedTimelineProps {
   days: RangeDay[];
   /** The day the window is centred on, scrolled to on arrival. */
   focusDate: string | null;
+  /** Lanes switched off explicitly *here*. */
   hidden: Set<string>;
-  onTogglePhenotype: (laneId: string) => void;
+  /** Lanes hidden on the Expanded tab, which are not offered here at all. */
+  excluded: Set<string>;
+  /** Lanes switched on explicitly, which is how a lane with no major events
+   *  gets here at all. */
+  shown: Set<string>;
+  onTogglePhenotype: (laneId: string, on: boolean) => void;
+  /** Drop the major-event curation and draw everything the lanes hold. */
+  allEvents: boolean;
+  onToggleAllEvents: () => void;
   selectedKey: string | null;
   onSelect: (selection: Selection) => void;
   zoom: number;
@@ -78,7 +202,11 @@ export function CollapsedTimeline({
   days,
   focusDate,
   hidden,
+  excluded,
+  shown,
   onTogglePhenotype,
+  allEvents,
+  onToggleAllEvents,
   selectedKey,
   onSelect,
   zoom,
@@ -105,14 +233,20 @@ export function CollapsedTimeline({
     centred.current = focusDate;
   }, [focusDate, focusIndex, dayWidth]);
 
-  const phenotypes = useMemo(() => togglablePhenotypes(days), [days]);
+  const phenotypes = useMemo(() => togglablePhenotypes(days, excluded), [days, excluded]);
+  const curated = useMemo(() => majorLaneIds(days), [days]);
+  const visible = useMemo(
+    () => visibleLaneIds(phenotypes, hidden, shown, curated),
+    [phenotypes, hidden, shown, curated],
+  );
   const total = useMemo(
     () =>
       days.reduce(
-        (count, day) => count + majorEvents(day.timeline?.lanes ?? [], hidden).length,
+        (count, day) =>
+          count + collapsedEvents(day.timeline?.lanes ?? [], visible, curated, allEvents).length,
         0,
       ),
-    [days, hidden],
+    [days, visible, curated, allEvents],
   );
   const loaded = days.filter((day) => day.status === 'loaded').length;
 
@@ -130,14 +264,14 @@ export function CollapsedTimeline({
           </span>
           {phenotypes.map((lane) => {
             const theme = accentTheme(lane.accent);
-            const on = !hidden.has(lane.id);
+            const on = visible.has(lane.id);
             return (
               <button
                 key={lane.id}
                 type="button"
                 aria-pressed={on}
                 data-testid={`collapsed-toggle-${lane.id}`}
-                onClick={() => onTogglePhenotype(lane.id)}
+                onClick={() => onTogglePhenotype(lane.id, !on)}
                 className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition ${
                   on ? '' : 'opacity-45 grayscale'
                 }`}
@@ -152,6 +286,28 @@ export function CollapsedTimeline({
               </button>
             );
           })}
+
+          {/* Anything on the Expanded tab can be brought onto this one. It is
+              off by default because a line meant to be readable at a glance
+              stops being readable with two hundred marks on it. */}
+          <button
+            type="button"
+            aria-pressed={allEvents}
+            data-testid="collapsed-all-events"
+            onClick={onToggleAllEvents}
+            title={
+              allEvents
+                ? 'Showing every event these lanes recorded'
+                : 'Showing each lane’s major events only'
+            }
+            className={`ml-auto rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition ${
+              allEvents
+                ? 'border-slate-300 bg-slate-100 text-slate-700'
+                : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700'
+            }`}
+          >
+            {allEvents ? 'Every event' : 'Major events only'}
+          </button>
         </div>
       ) : null}
 
@@ -164,7 +320,7 @@ export function CollapsedTimeline({
           <div className="flex items-center gap-3 px-5" style={{ height: HEIGHT }}>
             <span className="min-w-0">
               <span className="block text-[13.5px] font-semibold leading-tight text-slate-800">
-                Major events
+                {allEvents ? 'Every event' : 'Major events'}
               </span>
               <span className="mt-0.5 block text-[11.5px] leading-tight text-slate-500">
                 {total} observable event{total === 1 ? '' : 's'}
@@ -196,7 +352,9 @@ export function CollapsedTimeline({
                 day={day}
                 isFirstPanel={index === 0}
                 width={dayWidth}
-                hidden={hidden}
+                visible={visible}
+                curated={curated}
+                allEvents={allEvents}
                 selectedKey={selectedKey}
                 onSelect={onSelect}
                 onLoadDay={onLoadDay}
@@ -214,7 +372,9 @@ const DATE_HEADER = 26;
 function DayStrip({
   day,
   width,
-  hidden,
+  visible,
+  curated,
+  allEvents,
   selectedKey,
   onSelect,
   onLoadDay,
@@ -223,7 +383,9 @@ function DayStrip({
   day: RangeDay;
   width: number;
   isFirstPanel: boolean;
-  hidden: Set<string>;
+  visible: Set<string>;
+  curated: Set<string>;
+  allEvents: boolean;
   selectedKey: string | null;
   onSelect: (selection: Selection) => void;
   onLoadDay: (date: string) => void;
@@ -271,7 +433,9 @@ function DayStrip({
         <LoadedDay
           timeline={timeline}
           width={width}
-          hidden={hidden}
+          visible={visible}
+          curated={curated}
+          allEvents={allEvents}
           selectedKey={selectedKey}
           onSelect={onSelect}
           isFirstPanel={isFirstPanel}
@@ -343,14 +507,18 @@ export function trueSpan(event: TimelineEvent): { start: string; end?: string | 
 function LoadedDay({
   timeline,
   width,
-  hidden,
+  visible,
+  curated,
+  allEvents,
   selectedKey,
   onSelect,
   isFirstPanel,
 }: {
   timeline: DayTimeline;
   width: number;
-  hidden: Set<string>;
+  visible: Set<string>;
+  curated: Set<string>;
+  allEvents: boolean;
   selectedKey: string | null;
   onSelect: (selection: Selection) => void;
   /** No earlier panel exists, so a continuation here has nothing to defer to. */
@@ -361,7 +529,10 @@ function LoadedDay({
     [timeline.dayStart, timeline.dayEnd, timeline.localTimezone, width],
   );
 
-  const items = useMemo(() => majorEvents(timeline.lanes, hidden), [timeline.lanes, hidden]);
+  const items = useMemo(
+    () => collapsedEvents(timeline.lanes, visible, curated, allEvents),
+    [timeline.lanes, visible, curated, allEvents],
+  );
 
   /**
    * Geometry per event, with two rules for periods cut at midnight.
@@ -477,7 +648,9 @@ function LoadedDay({
               id={event.id}
               label={describeEvent(event, timeline.localTimezone)}
               selected={selected}
-              onSelect={() => onSelect({ kind: 'event', laneId: lane.id, event })}
+              onSelect={() =>
+                onSelect({ kind: 'event', laneId: lane.id, event, date: timeline.date })
+              }
             >
               <title>{eventTooltip(event, timeline.localTimezone)}</title>
               {endX - startX > 2 ? (
@@ -511,7 +684,7 @@ function LoadedDay({
                 </>
               ) : null}
               {visible ? (
-                <g pointerEvents="none">
+                <>
                   <line
                     x1={nodeX}
                     x2={nodeX}
@@ -519,7 +692,12 @@ function LoadedDay({
                     y2={above ? labelY + 6 : labelY - 12}
                     stroke="#cbd5e1"
                     strokeWidth={1}
+                    pointerEvents="none"
                   />
+                  {/* The words are part of the mark, so clicking them selects
+                      it. They used to sit in a `pointerEvents: none` group,
+                      which made the most obvious thing to click — the event's
+                      own name — the one thing that did nothing. */}
                   <text
                     x={nodeX}
                     y={labelY}
@@ -538,7 +716,48 @@ function LoadedDay({
                       timeline.localTimezone,
                     )}
                   </text>
-                </g>
+                  {/* And the gaps between the glyphs, so a click landing
+                      between two words is not a miss. */}
+                  <rect
+                    x={nodeX - labelHalfWidth(event.label)}
+                    y={labelY - 12}
+                    width={labelHalfWidth(event.label) * 2}
+                    height={29}
+                    fill="transparent"
+                  />
+                  {/* The column the leader line runs down, joining the caption
+                      to the baseline. Without it the middle of the mark — where
+                      a pointer aimed at "the event" most often lands — is a
+                      hole between the two halves of the same thing. */}
+                  <rect
+                    x={nodeX - 11}
+                    y={above ? labelY - 12 : BASELINE - 13}
+                    width={22}
+                    height={above ? BASELINE + 13 - (labelY - 12) : labelY + 17 - (BASELINE - 13)}
+                    fill="transparent"
+                  />
+                </>
+              ) : null}
+
+              {/* A bar is eight pixels tall and a glyph twenty-two across:
+                  both are small targets, and the centre of this mark's own
+                  bounding box lands in the empty space between the label and
+                  the baseline. These make the whole mark clickable. */}
+              <rect
+                x={startX - 2}
+                y={BASELINE - 7}
+                width={Math.max(endX - startX, 4) + 4}
+                height={14}
+                fill="transparent"
+              />
+              {announced ? (
+                <rect
+                  x={nodeX - 13}
+                  y={BASELINE - 13}
+                  width={26}
+                  height={26}
+                  fill="transparent"
+                />
               ) : null}
             </Mark>
           );

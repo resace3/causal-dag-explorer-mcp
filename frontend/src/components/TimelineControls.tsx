@@ -10,6 +10,11 @@ import { accentTheme } from '../utilities/lanes';
 
 export type ViewMode = 'expanded' | 'collapsed' | 'dag';
 
+/** Guards the stored tab: a value written by an older build must not stick. */
+export function isViewMode(value: unknown): value is ViewMode {
+  return value === 'expanded' || value === 'collapsed' || value === 'dag';
+}
+
 interface StreamVisibilityProps {
   lanes: Lane[];
   hidden: Set<string>;
@@ -76,6 +81,8 @@ function StreamVisibility({ lanes, hidden, onToggle }: StreamVisibilityProps) {
                   type="checkbox"
                   checked={checked}
                   onChange={() => onToggle(lane.id)}
+                  aria-label={lane.label}
+                  data-testid={`stream-visibility-${lane.id}`}
                   className="h-3.5 w-3.5 rounded border-slate-300"
                   style={{ accentColor: theme.stroke }}
                 />
@@ -95,7 +102,7 @@ function StreamVisibility({ lanes, hidden, onToggle }: StreamVisibilityProps) {
           {unavailable.length ? (
             <div className="mt-1.5 border-t border-slate-100 pt-2">
               <p className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">
-                No data yesterday
+                No data this day
               </p>
               {unavailable.map((lane) => (
                 <p key={lane.id} className="px-2 py-1 text-[11px] leading-snug text-slate-400">

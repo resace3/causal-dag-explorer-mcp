@@ -24,6 +24,15 @@ export const ACCENTS: Record<AccentToken, AccentTheme> = {
   teal: { stroke: '#0d9488', fill: '#14b8a6', soft: '#ccfbf1', band: '#f5fdfc', text: '#0f766e' },
   sky: { stroke: '#0284c7', fill: '#0ea5e9', soft: '#e0f2fe', band: '#f6fbff', text: '#0369a1' },
   cyan: { stroke: '#0891b2', fill: '#06b6d4', soft: '#cffafe', band: '#f5fdff', text: '#0e7490' },
+  amber: { stroke: '#b45309', fill: '#f59e0b', soft: '#fef3c7', band: '#fffcf4', text: '#92400e' },
+  fuchsia: {
+    stroke: '#a21caf',
+    fill: '#d946ef',
+    soft: '#fae8ff',
+    band: '#fefaff',
+    text: '#86198f',
+  },
+  rose: { stroke: '#be123c', fill: '#f43f5e', soft: '#ffe4e6', band: '#fff8f9', text: '#9f1239' },
 };
 
 export function accentTheme(accent: string): AccentTheme {
@@ -39,7 +48,10 @@ export const LANE_HEIGHTS: Record<string, number> = {
   sleep: 104,
   temperature: 100,
   environment: 116,
-  presence: 122,
+  presence: 106,
+  computer_use: 104,
+  phone_use: 92,
+  tiktok: 84,
   location: 96,
 };
 
@@ -73,6 +85,10 @@ export const MAJOR_CATEGORIES = new Set([
   'zone_named',
   // One notable physiological stretch — the renderer keeps only the first.
   'elevated',
+  // A followed app: a handful of spells a day, and the reason the row exists.
+  // Screen-on stretches and ordinary app spells are deliberately *not* here —
+  // a phone produces dozens of both, which is a smear rather than a landmark.
+  'tiktok',
 ]);
 
 export const GRID_LINE = '#e6ebf2';

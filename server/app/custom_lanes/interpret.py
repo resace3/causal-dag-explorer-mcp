@@ -36,7 +36,12 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "readiness": ("readiness", "recovery", "body battery", "training readiness"),
     "temperature": ("skin temperature", "wrist temperature", "body temperature"),
     "environment": ("light", "illuminance", "brightness", "room temperature", "ambient"),
-    "presence": ("presence", "home", "away", "motion", "occupancy", "device use", "phone use"),
+    "presence": ("presence", "home", "away", "motion", "occupancy"),
+    # Screen use moved to its own lane, so the words that mean it have to move
+    # with it — left here they would resolve a phone question against door
+    # sensors and quietly answer the wrong thing.
+    "phone_use": ("phone", "phone use", "device use", "screen", "screen time", "unlock"),
+    "tiktok": ("tiktok", "tik tok"),
     "location": ("location", "place", "where", "zone", "town"),
 }
 

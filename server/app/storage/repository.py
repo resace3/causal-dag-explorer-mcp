@@ -19,6 +19,7 @@ from .models import (
     DayTimelineRow,
     CausalEdgeOverrideRow,
     CustomLaneRow,
+    KnownSourceRow,
     LaneConfigRow,
     SourceSelectionRow,
     RawRecordRow,
@@ -315,7 +316,13 @@ class Repository:
             row = session.get(SourceSelectionRow, "default")
             return list(row.sources) if row else None
 
-    def set_source_selection(self, sources: list[str]) -> list[str]:
+    def set_source_selection(self, sources: list[str], known: list[str] | None = None) -> list[str]:
+        """Store the chosen order, and which sources were on offer at the time.
+
+        `known` is what makes a later "this source is not selected" readable: a
+        source recorded here and left out was switched off, one that was never
+        recorded simply did not exist yet.
+        """
         with self.session() as session:
             session.merge(
                 SourceSelectionRow(
@@ -324,8 +331,15 @@ class Repository:
                     updated_at=datetime.now().astimezone(),
                 )
             )
+            for source_id in known if known is not None else sources:
+                session.merge(KnownSourceRow(id=source_id))
             session.commit()
         return sources
+
+    def known_sources(self) -> set[str]:
+        """Sources this install has offered at least once."""
+        with self.session() as session:
+            return {row.id for row in session.exec(select(KnownSourceRow)).all()}
 
     # -- maintenance -----------------------------------------------------
 

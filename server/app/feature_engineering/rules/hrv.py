@@ -30,7 +30,7 @@ def build_lane(context: RuleContext) -> Lane:
         lane.unavailable_reason = "The configured wearable provider does not expose HRV."
         return lane
     if not payload.hrv:
-        lane.unavailable_reason = "No HRV data was available yesterday."
+        lane.unavailable_reason = "No HRV data was available for this day."
         return lane
 
     events: list[TimelineEvent] = []

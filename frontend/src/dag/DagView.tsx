@@ -23,14 +23,13 @@ import {
   type DagOccurrence,
   type DagResponse,
   type DagRow,
-  type DagVariable,
 } from '../api/client';
 import { useElementWidth } from '../hooks/useElementWidth';
-import { VariableIcon } from '../components/Icons';
+import { LaneIcon, VariableIcon } from '../components/Icons';
 import { EdgeEditor } from './EdgeEditor';
 import { AxisRow, GridLines } from '../timeline/Axis';
 import { PAD_LEFT, createScale } from '../timeline/scale';
-import { AXIS_HEIGHT, LANE_LABEL_WIDTH } from '../utilities/lanes';
+import { AXIS_HEIGHT, LANE_LABEL_WIDTH, accentTheme } from '../utilities/lanes';
 import { formatTime } from '../utilities/time';
 
 const ROW_HEIGHT = 86;
@@ -46,7 +45,16 @@ const IMMEDIATE_COLOR = '#1e3a8a';
 const DELAYED_COLOR = '#16a34a';
 const USER_EDGE_COLOR = '#7c3aed';
 
-interface RoleStyle {
+/**
+ * How a variable is coloured.
+ *
+ * Nodes take the colour of the timeline lane they are observed through, so a
+ * row here and a row on the Expanded tab are recognisably the same thing. The
+ * earlier version coloured by causal role — exposure, confounder, mediator —
+ * but those are properties of a variable *relative to a named question*, and
+ * this tab no longer asks one: every node would have been the same grey.
+ */
+interface NodeStyle {
   /** Pale wash, for bands and legend swatches. */
   fill: string;
   stroke: string;
@@ -54,66 +62,31 @@ interface RoleStyle {
   solid: string;
   text: string;
   label: string;
+  /** Drawn hollow, so variables nothing records do not read as observations. */
+  outlined: boolean;
 }
 
-const ROLE_STYLES: Record<string, RoleStyle> = {
-  exposure: {
-    fill: '#dcfce7',
-    stroke: '#16a34a',
-    solid: '#16a34a',
-    text: '#14532d',
-    label: 'Exposure',
-  },
-  outcome: {
-    fill: '#dbeafe',
-    stroke: '#2563eb',
-    solid: '#2563eb',
-    text: '#1e3a8a',
-    label: 'Outcome',
-  },
-  confounder: {
-    fill: '#fef3c7',
-    stroke: '#d97706',
-    solid: '#d97706',
-    text: '#78350f',
-    label: 'Confounder',
-  },
-  mediator: {
-    fill: '#ede9fe',
-    stroke: '#7c3aed',
-    solid: '#7c3aed',
-    text: '#4c1d95',
-    label: 'Mediator',
-  },
-  collider: {
-    fill: '#ffe4e6',
-    stroke: '#e11d48',
-    solid: '#e11d48',
-    text: '#881337',
-    label: 'Collider',
-  },
-  'direct cause': {
-    fill: '#f1f5f9',
-    stroke: '#64748b',
-    solid: '#475569',
-    text: '#334155',
-    label: 'Direct cause',
-  },
-  context: {
-    fill: '#f1f5f9',
-    stroke: '#94a3b8',
-    solid: '#64748b',
-    text: '#475569',
-    label: 'Context',
-  },
-};
+export interface DagLaneStyle {
+  id: string;
+  label: string;
+  description: string;
+  accent: string;
+}
 
 /**
- * Background material is drawn as an outline rather than a solid, so the nodes
- * that carry a role in the analysis stay the ones that catch the eye. Without
- * this, "context" and "direct cause" are two slates nobody can tell apart.
+ * Defensive only. Every row here belongs to a lane that is on screen in the
+ * Expanded tab, so this should never be reached; a variable whose lane went
+ * missing between the fetch and the render is drawn neutrally rather than
+ * crashing the tab.
  */
-const OUTLINED_ROLES = new Set(['context']);
+const UNKNOWN_LANE_STYLE: NodeStyle = {
+  fill: '#f1f5f9',
+  stroke: '#94a3b8',
+  solid: '#64748b',
+  text: '#475569',
+  label: '',
+  outlined: true,
+};
 
 /** Weaker evidence for a link must not be drawn like stronger evidence. */
 const STRENGTH_STYLES: Record<string, { width: number; opacity: number; label: string }> = {
@@ -122,12 +95,15 @@ const STRENGTH_STYLES: Record<string, { width: number; opacity: number; label: s
   speculative: { width: 1.2, opacity: 0.55, label: 'speculative' },
 };
 
-function roleStyle(role: string) {
-  return ROLE_STYLES[role] ?? ROLE_STYLES.context;
-}
-
 function strengthStyle(strength: string) {
   return STRENGTH_STYLES[strength] ?? STRENGTH_STYLES.plausible;
+}
+
+/** How many variable tiers sit above lane group `index`. */
+function tierOffset(groups: { variables: unknown[] }[], index: number): number {
+  let total = 0;
+  for (let i = 0; i < index && i < groups.length; i += 1) total += groups[i].variables.length;
+  return total;
 }
 
 /** "7 AM" on the hour, "11:19 AM" otherwise — the reference-style compact label. */
@@ -142,83 +118,87 @@ function formatLag(minutes: number): string {
   return `${hours >= 10 ? Math.round(hours) : hours.toFixed(1)} h later`;
 }
 
-function VariableSelect({
-  label,
-  value,
+/**
+ * One label per lane, spanning that lane's variable tiers.
+ *
+ * Deliberately the same shape, icon and words as the Expanded tab's row label:
+ * the two tabs are describing one row of one day, and a reader should not have
+ * to work out that "Sleep duration" over here is part of "Sleep" over there.
+ */
+function RowLabel({
+  lane,
+  style,
   variables,
-  onChange,
-  allowNone,
-  testId,
 }: {
-  label: string;
-  value: string;
-  variables: DagVariable[];
-  onChange: (value: string) => void;
-  allowNone?: boolean;
-  testId: string;
+  lane: DagLaneStyle;
+  style: NodeStyle;
+  variables: DagRow[];
 }) {
   return (
-    <label className="flex items-center gap-2 text-[12.5px] text-slate-600">
-      {label}
-      <select
-        value={value}
-        data-testid={testId}
-        onChange={(event) => onChange(event.target.value)}
-        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px] text-slate-700 transition hover:border-slate-300"
-      >
-        {allowNone ? <option value="">— none —</option> : null}
-        {variables.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.label}
-            {item.measured ? '' : ' (unmeasured)'}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function RowLabel({ row }: { row: DagRow }) {
-  const style = roleStyle(row.role);
-  return (
     <div
-      className="flex items-center gap-2.5 border-b border-slate-100 px-5"
-      style={{ height: ROW_HEIGHT }}
-      data-testid={`dag-row-${row.variable}`}
+      className="flex items-center gap-2.5 border-b border-slate-100 pl-5 pr-2"
+      style={{ height: variables.length * ROW_HEIGHT }}
+      data-testid={`dag-row-${lane.id}`}
     >
       <span
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-        style={{ backgroundColor: style.fill, color: style.solid }}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border"
+        style={{ borderColor: style.fill, backgroundColor: '#ffffff', color: style.solid }}
         aria-hidden
       >
-        <VariableIcon variable={row.variable} size={17} />
+        <LaneIcon laneId={lane.id} size={19} />
       </span>
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span
-          className="block truncate text-[13px] font-semibold leading-tight"
+          className="block truncate text-[13.5px] font-semibold leading-tight"
           style={{ color: style.text }}
         >
-          {row.label}
+          {lane.label}
         </span>
-        <span className="mt-0.5 block truncate text-[11px] leading-tight text-slate-500">
-          {style.label}
-          {row.unit ? ` · ${row.unit}` : ''}
+        <span className="mt-0.5 block truncate text-[11.5px] leading-tight text-slate-500">
+          {lane.description}
         </span>
       </span>
+
+      {/* A lane can hold several quantities — sleep duration, onset and
+          efficiency are three. They are named here, each aligned with its own
+          tier, rather than captioned inside the plot where a mark at midnight
+          would sit on top of the words. No glyph beside the name: the node in
+          the tier already carries it, and the width would come out of the
+          lane's description. */}
+      {variables.length > 1 ? (
+        <span className="flex w-[68px] shrink-0 flex-col">
+          {variables.map((variable) => (
+            <span
+              key={variable.variable}
+              className="flex items-center justify-end"
+              style={{ height: ROW_HEIGHT }}
+              title={variable.label}
+            >
+              {/* The truncation has to happen on this inner span: a flex item
+                  aligned to the end overflows to the *left*, which cuts the
+                  start of the word off instead of adding an ellipsis. */}
+              <span className="min-w-0 truncate text-[9.5px] leading-tight text-slate-400">
+                {variable.label}
+              </span>
+            </span>
+          ))}
+        </span>
+      ) : null}
     </div>
   );
 }
 
-export function DagView({ date }: { date: string | null }) {
-  const [variables, setVariables] = useState<DagVariable[]>([]);
-  const [outcome, setOutcome] = useState('sleep_duration');
-  const [exposure, setExposure] = useState('');
+/**
+ * @param lanes Timeline lanes in the order the Expanded tab is showing them,
+ *   which is the order these rows take. The two tabs describe one day, so a
+ *   variable must not sit third here and eighth there.
+ */
+export function DagView({ date, lanes }: { date: string | null; lanes: DagLaneStyle[] }) {
   const [dag, setDag] = useState<DagResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [hovered, setHovered] = useState<DagLink | null>(null);
   const [selected, setSelected] = useState<DagOccurrence | null>(null);
-  const [editing, setEditing] = useState(false);
   // Bumped by the editor so an added or removed arrow rebuilds the graph.
   const [edgeRevision, setEdgeRevision] = useState(0);
   // A connection being dragged out of a node, and where the pointer is now.
@@ -232,18 +212,10 @@ export function DagView({ date }: { date: string | null }) {
 
   useEffect(() => {
     if (!date) return;
-    void api
-      .dagVariables(date)
-      .then((response) => setVariables(response.variables))
-      .catch(() => setVariables([]));
-  }, [date]);
-
-  useEffect(() => {
-    if (!date) return;
     const id = (requestId.current += 1);
     setBusy(true);
     void api
-      .dag({ outcome, exposure: exposure || null, day: date })
+      .dag({ day: date })
       .then((response) => {
         if (id !== requestId.current) return;
         setDag(response);
@@ -258,7 +230,7 @@ export function DagView({ date }: { date: string | null }) {
       .finally(() => {
         if (id === requestId.current) setBusy(false);
       });
-  }, [date, outcome, exposure, edgeRevision]);
+  }, [date, edgeRevision]);
 
   const placed = dag?.timeline ?? null;
   const plotWidth = Math.max(width, MIN_PLOT_WIDTH);
@@ -271,21 +243,71 @@ export function DagView({ date }: { date: string | null }) {
     [placed, plotWidth],
   );
 
+  const laneRank = useMemo(
+    () => new Map(lanes.map((lane, index) => [lane.id, index])),
+    [lanes],
+  );
+  const laneById = useMemo(() => new Map(lanes.map((lane) => [lane.id, lane])), [lanes]);
+
+  /** A variable's colour and label come from the lane it is observed through. */
+  const styleOf = useCallback(
+    (laneId: string | null | undefined): NodeStyle => {
+      const lane = laneId ? laneById.get(laneId) : undefined;
+      if (!lane) return UNKNOWN_LANE_STYLE;
+      const theme = accentTheme(lane.accent);
+      return {
+        fill: theme.soft,
+        stroke: theme.stroke,
+        solid: theme.stroke,
+        text: theme.text,
+        label: lane.label,
+        outlined: false,
+      };
+    },
+    [laneById],
+  );
+
   /**
-   * Rows the day can actually draw, kept in the backend's cause-first order.
+   * The rows are the Expanded tab's rows: one per lane, same names, same order.
    *
-   * While editing, every variable in the graph gets a row even when the day
-   * recorded nothing for it — otherwise there would be no way to draw an arrow
-   * to stress or work schedule, which are exactly the ones worth adding. In
-   * view mode the original rule holds: a row appears only when the day has
-   * something to put on it.
+   * A lane can carry several variables — sleep duration, onset and efficiency
+   * are three quantities on one row — so each lane's row holds a tier per
+   * variable, exactly as Presence & Motion stacks home/away, arrivals, motion
+   * and device use inside a single row over there. The label names the lane;
+   * the glyph in a node names the variable; a caption at the left of each tier
+   * spells it out.
+   *
+   * `lanes` is exactly what the Expanded tab is drawing — already ordered,
+   * already without the lanes you hid and without the ones this day has no data
+   * for — so nothing appears here that is not a row there. Three kinds of row
+   * are therefore absent, and each used to be on screen:
+   *
+   *  * variables of a lane you hid;
+   *  * variables of a lane with no data today, such as HRV on a night the watch
+   *    was not worn;
+   *  * variables no lane observes at all — stress, alcohol, work schedule.
+   *
+   * The last one costs something real: those arrows can no longer be drawn by
+   * dragging, because there is no tier to drag to. They remain in the model and
+   * in the ledger below, and reappear here if a source ever starts reporting
+   * them.
    */
-  const rows = useMemo(() => {
+  const groups = useMemo(() => {
     if (!placed) return [];
-    if (editing) return placed.rows;
-    const withData = new Set(placed.occurrences.map((item) => item.variable));
-    return placed.rows.filter((row) => withData.has(row.variable));
-  }, [placed, editing]);
+    const byLane = new Map<string, DagRow[]>();
+    for (const row of placed.rows) {
+      if (!row.lane || !laneRank.has(row.lane)) continue;
+      const list = byLane.get(row.lane);
+      if (list) list.push(row);
+      else byLane.set(row.lane, [row]);
+    }
+    return lanes
+      .filter((lane) => byLane.has(lane.id))
+      .map((lane) => ({ lane, variables: byLane.get(lane.id) as DagRow[] }));
+  }, [placed, lanes, laneRank]);
+
+  /** The variable tiers, flattened — the unit the graph is actually drawn in. */
+  const rows = useMemo(() => groups.flatMap((group) => group.variables), [groups]);
 
   const rowIndex = useMemo(
     () => new Map(rows.map((row, index) => [row.variable, index])),
@@ -305,7 +327,7 @@ export function DagView({ date }: { date: string | null }) {
         x,
         xEnd,
         y: index * ROW_HEIGHT + ROW_HEIGHT / 2,
-        role: rows[index].role,
+        lane: rows[index].lane,
       });
     }
     return { nodes, byId: new Map(nodes.map((node) => [node.occurrence.id, node])) };
@@ -427,68 +449,31 @@ export function DagView({ date }: { date: string | null }) {
   }, [geometry]);
 
   const height = Math.max(ROW_HEIGHT, rows.length * ROW_HEIGHT);
-  const kinds = useMemo(() => {
-    const seen = new Set(rows.map((row) => row.role));
-    return [...seen].sort();
-  }, [rows]);
 
   return (
     <div className="flex flex-col" data-testid="timeline-dag">
-      <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 px-5 py-3">
-        <VariableSelect
-          label="Outcome"
-          value={outcome}
-          variables={variables}
-          onChange={setOutcome}
-          testId="dag-outcome"
+      {/* No mode to enter: arrows are drawn by dragging, always. A button that
+          turned editing on made drawing look like a separate feature, when it
+          is the only thing this tab is for. */}
+      <p className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-violet-50/50 px-5 py-2 text-[12px] text-violet-900">
+        <span
+          className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2"
+          style={{ borderColor: USER_EDGE_COLOR }}
+          aria-hidden
         />
-        <VariableSelect
-          label="Exposure"
-          value={exposure}
-          variables={variables.filter((item) => item.id !== outcome)}
-          onChange={setExposure}
-          allowNone
-          testId="dag-exposure"
-        />
-        {busy ? <span className="text-[11.5px] text-slate-400">Building…</span> : null}
-
-        <button
-          type="button"
-          onClick={() => setEditing((value) => !value)}
-          aria-expanded={editing}
-          data-testid="dag-edit-toggle"
-          className={`ml-auto rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition ${
-            editing
-              ? 'border-slate-300 bg-slate-100 text-slate-800'
-              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-800'
-          }`}
+        Drag the dot on a node onto another row to draw an arrow. Hover an arrow to remove
+        it. The rows are the streams on your timeline for this day — hide one there and it
+        leaves here too.
+        {busy ? <span className="text-violet-400">Building…</span> : null}
+      </p>
+      {editError ? (
+        <p
+          role="alert"
+          data-testid="dag-edit-error"
+          className="border-b border-rose-100 bg-rose-50 px-5 py-2 text-[12px] leading-relaxed text-rose-800"
         >
-          {editing ? 'Done editing' : 'Edit arrows'}
-        </button>
-      </div>
-
-      {editing ? (
-        <>
-          <p className="flex items-center gap-2 border-b border-slate-100 bg-violet-50/50 px-5 py-2 text-[12px] text-violet-900">
-            <span
-              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2"
-              style={{ borderColor: USER_EDGE_COLOR }}
-              aria-hidden
-            />
-            Drag the dot on a node onto another row to draw an arrow. Hover an arrow to
-            remove it. Every variable in this graph has a row while editing, even the ones
-            today recorded nothing for.
-          </p>
-          {editError ? (
-            <p
-              role="alert"
-              data-testid="dag-edit-error"
-              className="border-b border-rose-100 bg-rose-50 px-5 py-2 text-[12px] leading-relaxed text-rose-800"
-            >
-              {editError}
-            </p>
-          ) : null}
-        </>
+          {editError}
+        </p>
       ) : null}
 
       {error ? (
@@ -506,8 +491,9 @@ export function DagView({ date }: { date: string | null }) {
       {placed && scale ? (
         rows.length === 0 ? (
           <p className="px-5 py-10 text-center text-[12.5px] text-slate-500">
-            None of the variables in this graph were recorded on this day, so there is nothing to
-            place on the clock.
+            No row on the timeline carries a variable in this model, so there is nothing to
+            place on the clock. Restore a row from “Visible data streams”, or pick a day with
+            more data.
           </p>
         ) : (
           <div className="flex">
@@ -516,8 +502,13 @@ export function DagView({ date }: { date: string | null }) {
               style={{ width: LANE_LABEL_WIDTH }}
             >
               <div style={{ height: AXIS_HEIGHT }} />
-              {rows.map((row) => (
-                <RowLabel key={row.variable} row={row} />
+              {groups.map((group) => (
+                <RowLabel
+                  key={group.lane.id}
+                  lane={group.lane}
+                  style={styleOf(group.lane.id)}
+                  variables={group.variables}
+                />
               ))}
               <div style={{ height: AXIS_HEIGHT }} />
             </div>
@@ -530,9 +521,7 @@ export function DagView({ date }: { date: string | null }) {
                   width={plotWidth}
                   height={height}
                   role="group"
-                  aria-label={`Causal graph for ${
-                    dag?.outcome ?? 'the outcome'
-                  }, placed on the day's clock`}
+                  aria-label="Causal model, placed on the day's clock"
                   className={`block ${connect ? 'cursor-crosshair' : ''}`}
                 >
                   <defs>
@@ -560,34 +549,55 @@ export function DagView({ date }: { date: string | null }) {
                     </marker>
                   </defs>
 
-                  {rows.map((row, index) => (
-                    <rect
-                      key={row.variable}
-                      x={0}
-                      y={index * ROW_HEIGHT}
-                      width={plotWidth}
-                      height={ROW_HEIGHT}
-                      fill={
-                        hoverRow === row.variable && connect && connect.from !== row.variable
-                          ? '#eef2ff'
-                          : index % 2 === 0
-                            ? '#ffffff'
-                            : '#fafbfc'
-                      }
-                    />
-                  ))}
+                  {/* One band per lane, in the lane's own tint, so the row a
+                      mark sits in is the row named in the label beside it. */}
+                  {groups.map((group, index) => {
+                    const top = tierOffset(groups, index) * ROW_HEIGHT;
+                    return (
+                      <rect
+                        key={group.lane.id}
+                        x={0}
+                        y={top}
+                        width={plotWidth}
+                        height={group.variables.length * ROW_HEIGHT}
+                        fill={accentTheme(group.lane.accent).band}
+                      />
+                    );
+                  })}
+
+                  {/* The tier under the pointer during a drag. Tiers are not
+                      drawn as rows, but the drop target has to be visible. */}
+                  {connect
+                    ? rows.map((row, index) =>
+                        hoverRow === row.variable && connect.from !== row.variable ? (
+                          <rect
+                            key={`hover-${row.variable}`}
+                            x={0}
+                            y={index * ROW_HEIGHT}
+                            width={plotWidth}
+                            height={ROW_HEIGHT}
+                            fill="#eef2ff"
+                          />
+                        ) : null,
+                      )
+                    : null}
+
                   <GridLines scale={scale} height={height} />
-                  {rows.map((row, index) => (
+
+                  {/* Separators between lanes only. A line between two tiers of
+                      one lane would make it read as two rows. */}
+                  {groups.map((group, index) => (
                     <line
-                      key={`sep-${row.variable}`}
+                      key={`sep-${group.lane.id}`}
                       x1={0}
                       x2={plotWidth}
-                      y1={(index + 1) * ROW_HEIGHT}
-                      y2={(index + 1) * ROW_HEIGHT}
-                      stroke="#f1f5f9"
+                      y1={tierOffset(groups, index + 1) * ROW_HEIGHT}
+                      y2={tierOffset(groups, index + 1) * ROW_HEIGHT}
+                      stroke="#e6ebf2"
                       strokeWidth={1}
                     />
                   ))}
+
 
                   {placed.links.map((link) => (
                     <LinkPath
@@ -600,7 +610,6 @@ export function DagView({ date }: { date: string | null }) {
                       }
                       onHover={setHovered}
                       timeZone={placed.localTimezone}
-                      editing={editing}
                       onRemove={removeEdge}
                     />
                   ))}
@@ -609,11 +618,11 @@ export function DagView({ date }: { date: string | null }) {
                     <Node
                       key={node.occurrence.id}
                       node={node}
+                      style={styleOf(node.lane)}
                       timeZone={placed.localTimezone}
                       selected={selected?.id === node.occurrence.id}
                       showCaption={captionVisible.has(node.occurrence.id)}
                       plotWidth={plotWidth}
-                      editing={editing}
                       connecting={connect?.from === node.occurrence.variable}
                       onStartConnect={startConnect}
                       onSelect={(occurrence) =>
@@ -627,22 +636,21 @@ export function DagView({ date }: { date: string | null }) {
                   {/* Variables the day recorded nothing for still need somewhere
                       to grab, or the arrows most worth adding — to stress, to
                       work schedule — could never be drawn. */}
-                  {editing
-                    ? rows.map((row, index) =>
-                        geometry.nodes.some((node) => node.occurrence.variable === row.variable)
-                          ? null
-                          : (
-                              <Anchor
-                                key={`anchor-${row.variable}`}
-                                row={row}
-                                x={PAD_LEFT + 22}
-                                y={index * ROW_HEIGHT + ROW_HEIGHT / 2}
-                                connecting={connect?.from === row.variable}
-                                onStartConnect={startConnect}
-                              />
-                            ),
-                      )
-                    : null}
+                  {rows.map((row, index) =>
+                    geometry.nodes.some((node) => node.occurrence.variable === row.variable)
+                      ? null
+                      : (
+                          <Anchor
+                            key={`anchor-${row.variable}`}
+                            row={row}
+                            style={styleOf(row.lane)}
+                            x={PAD_LEFT + 22}
+                            y={index * ROW_HEIGHT + ROW_HEIGHT / 2}
+                            connecting={connect?.from === row.variable}
+                            onStartConnect={startConnect}
+                          />
+                        ),
+                  )}
 
                   {/* Whole rows are the drop target: aiming at a node would
                       make connecting fiddly, and every node in a row stands for
@@ -752,19 +760,8 @@ export function DagView({ date }: { date: string | null }) {
             An arrow you added
           </span>
         ) : null}
-        {kinds.map((role) => (
-          <span key={role} className="flex items-center gap-1.5">
-            <span
-              className="h-3 w-3 rounded-full border-[1.5px]"
-              style={{
-                backgroundColor: OUTLINED_ROLES.has(role) ? '#ffffff' : roleStyle(role).solid,
-                borderColor: roleStyle(role).solid,
-              }}
-              aria-hidden
-            />
-            {roleStyle(role).label}
-          </span>
-        ))}
+        {/* No colour key for the lanes: every row is labelled with its lane
+            name a few pixels to the left, so a swatch repeating that is noise. */}
       </div>
 
       {selected ? (
@@ -795,11 +792,7 @@ export function DagView({ date }: { date: string | null }) {
         </div>
       ) : null}
 
-      {editing ? (
-        <EdgeEditor
-          onChanged={() => setEdgeRevision((value) => value + 1)}
-        />
-      ) : null}
+      <EdgeEditor onChanged={() => setEdgeRevision((value) => value + 1)} />
     </div>
   );
 }
@@ -809,7 +802,7 @@ interface PlacedNode {
   x: number;
   xEnd: number;
   y: number;
-  role: string;
+  lane: string | null;
 }
 
 /**
@@ -854,28 +847,27 @@ function ConnectHandle({
 
 function Node({
   node,
+  style,
   timeZone,
   selected,
   showCaption,
   plotWidth,
-  editing,
   connecting,
   onStartConnect,
   onSelect,
 }: {
   node: PlacedNode;
+  style: NodeStyle;
   timeZone: string;
   selected: boolean;
   showCaption: boolean;
   plotWidth: number;
-  editing: boolean;
   connecting: boolean;
   onStartConnect: (variable: string, x: number, y: number) => void;
   onSelect: (occurrence: DagOccurrence) => void;
 }) {
   const { occurrence, x, xEnd, y } = node;
-  const style = roleStyle(node.role);
-  const outlined = OUTLINED_ROLES.has(node.role);
+  const outlined = style.outlined;
   const isBand = occurrence.kind === 'span' || occurrence.kind === 'constant';
   const activate = () => onSelect(occurrence);
   // A node at midnight would have half its caption cut off by the plot edge.
@@ -1025,7 +1017,7 @@ function Node({
         fill="transparent"
       />
 
-      {editing ? (
+      {(
         <ConnectHandle
           x={Math.max(x, xEnd) + NODE_RADIUS + 3}
           y={y}
@@ -1033,30 +1025,34 @@ function Node({
           testId={`dag-handle-${occurrence.variable}`}
           onStart={(hx, hy) => onStartConnect(occurrence.variable, hx, hy)}
         />
-      ) : null}
+      )}
     </g>
   );
 }
 
 /**
- * A stand-in node for a variable the day recorded nothing for. Only drawn while
- * editing: in view mode an empty row would assert a presence the data does not
- * support, but while wiring the model you have to be able to reach it.
+ * A stand-in node for a variable the day recorded nothing for.
+ *
+ * Drawn dashed and captioned "no data this day", so it cannot be read as an
+ * observation — but present, because you have to be able to reach a variable to
+ * wire it into the model, and the ones with no data are exactly the ones whose
+ * arrows are worth writing down.
  */
 function Anchor({
   row,
+  style,
   x,
   y,
   connecting,
   onStartConnect,
 }: {
   row: DagRow;
+  style: NodeStyle;
   x: number;
   y: number;
   connecting: boolean;
   onStartConnect: (variable: string, x: number, y: number) => void;
 }) {
-  const style = roleStyle(row.role);
   return (
     <g data-testid={`dag-anchor-${row.variable}`}>
       <title>{`${row.label} — ${row.note}`}</title>
@@ -1106,7 +1102,6 @@ function LinkPath({
   hovered,
   onHover,
   timeZone,
-  editing,
   onRemove,
 }: {
   link: DagLink;
@@ -1115,7 +1110,6 @@ function LinkPath({
   hovered: boolean;
   onHover: (link: DagLink | null) => void;
   timeZone: string;
-  editing: boolean;
   onRemove: (source: string, target: string) => void;
 }) {
   if (!from || !to) return null;
@@ -1207,9 +1201,9 @@ function LinkPath({
       ) : null}
       <path d={d} fill="none" stroke="transparent" strokeWidth={12} />
 
-      {/* While editing, an arrow carries its own delete control at the midpoint
-          — the same place the eye already goes when hovering it. */}
-      {editing && hovered ? (
+      {/* An arrow carries its own delete control at the midpoint — the same
+          place the eye already goes when hovering it. */}
+      {hovered ? (
         <g
           className="cursor-pointer"
           data-testid={`dag-link-remove-${link.sourceVariable}-${link.targetVariable}`}

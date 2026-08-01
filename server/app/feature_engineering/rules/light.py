@@ -72,7 +72,7 @@ def build_lane(context: RuleContext) -> Lane:
             )
         else:
             lane.unavailable_reason = (
-                "No illuminance or room-temperature entities produced data yesterday. "
+                "No illuminance or room-temperature entities produced data on this day. "
                 "Check home_assistant.entities in config.yaml."
             )
     return lane

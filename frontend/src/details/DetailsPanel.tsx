@@ -8,12 +8,14 @@ import { api } from '../api/client';
 import { CloseIcon, LaneIcon } from '../components/Icons';
 import type { RawRecordSummary, Selection, TimelineEvent } from '../types/timeline';
 import { accentTheme } from '../utilities/lanes';
-import { formatDuration, formatTime, formatTimeRange } from '../utilities/time';
+import { formatDuration, formatIsoDate, formatTime, formatTimeRange } from '../utilities/time';
 
 interface DetailsPanelProps {
   selection: Selection;
   accent: string;
   timeZone: string;
+  /** The day the page is showing, so a mark from another one can say so. */
+  displayedDate?: string | null;
   onClose: () => void;
 }
 
@@ -157,7 +159,7 @@ function EventBody({
               <span className="text-slate-600">
                 {event.continuesBefore ? 'Starts on the previous day. ' : ''}
                 {event.continuesAfter ? 'Continues into the next day. ' : ''}
-                Drawn clipped to yesterday; the full timestamps are shown above.
+                Drawn clipped to this day; the full timestamps are shown above.
               </span>
             }
           />
@@ -341,7 +343,13 @@ function EventBody({
   );
 }
 
-export function DetailsPanel({ selection, accent, timeZone, onClose }: DetailsPanelProps) {
+export function DetailsPanel({
+  selection,
+  accent,
+  timeZone,
+  displayedDate,
+  onClose,
+}: DetailsPanelProps) {
   const [raw, setRaw] = useState<RawRecordSummary[] | null>(null);
   const [loadingRaw, setLoadingRaw] = useState(false);
   const [rawError, setRawError] = useState<string | null>(null);
@@ -357,6 +365,18 @@ export function DetailsPanel({ selection, accent, timeZone, onClose }: DetailsPa
     selection.kind === 'event'
       ? formatTimeRange(selection.event.startTime, selection.event.endTime, timeZone)
       : formatTime(selection.point.timestamp, timeZone);
+
+  /**
+   * The day this mark came from, named only when it is not the day on screen.
+   *
+   * A mark picked out of the collapsed strip can belong to any day in the
+   * two-month window; showing its times under a page headed "Yesterday"
+   * without saying so would attribute one day's events to another.
+   */
+  const otherDay =
+    selection.kind === 'event' && selection.date && selection.date !== displayedDate
+      ? selection.date
+      : null;
 
   const loadRaw = async () => {
     if (selection.kind !== 'event') return;
@@ -394,6 +414,14 @@ export function DetailsPanel({ selection, accent, timeZone, onClose }: DetailsPa
         <span className="min-w-0 flex-1">
           <h2 className="text-[15px] font-semibold leading-snug text-slate-900">{title}</h2>
           <p className="mt-0.5 text-[12px] text-slate-500">{subtitle}</p>
+          {otherDay ? (
+            <p
+              className="mt-1 text-[11.5px] font-medium text-amber-700"
+              data-testid="details-other-day"
+            >
+              From {formatIsoDate(otherDay)}, not the day on screen
+            </p>
+          ) : null}
         </span>
         <button
           type="button"

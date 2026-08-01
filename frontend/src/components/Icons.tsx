@@ -362,6 +362,30 @@ export function HouseThermoIcon({ size = 18, className, strokeWidth }: IconProps
   );
 }
 
+export function MonitorIcon({ size = 18, className, strokeWidth }: IconProps) {
+  return (
+    <svg {...base(size, className, strokeWidth)}>
+      <rect x="2.6" y="4.2" width="18.8" height="12.4" rx="2" />
+      <path d="M8.6 20h6.8" />
+      <path d="M12 16.6V20" />
+    </svg>
+  );
+}
+
+/**
+ * A phone playing something, for the followed-app row. Deliberately not a brand
+ * mark: the row follows whichever packages are configured, and stamping one
+ * company's logo on it would make a configurable row look like an integration.
+ */
+export function ShortVideoIcon({ size = 18, className, strokeWidth }: IconProps) {
+  return (
+    <svg {...base(size, className, strokeWidth)}>
+      <rect x="6.4" y="3" width="11.2" height="18" rx="2.4" />
+      <path d="M10.6 9.2l4.2 2.8-4.2 2.8z" />
+    </svg>
+  );
+}
+
 const LANE_ICONS: Record<string, (props: IconProps) => JSX.Element> = {
   activity: ActivityIcon,
   heart_rate: HeartIcon,
@@ -371,6 +395,9 @@ const LANE_ICONS: Record<string, (props: IconProps) => JSX.Element> = {
   temperature: ThermometerIcon,
   environment: HomeIcon,
   presence: PresenceIcon,
+  computer_use: MonitorIcon,
+  phone_use: PhoneIcon,
+  tiktok: ShortVideoIcon,
   location: PlaceIcon,
 };
 
@@ -385,6 +412,7 @@ export function LaneIcon({ laneId, ...props }: IconProps & { laneId: string }) {
  * different quantities, and a graph node has to say which one it is.
  */
 const VARIABLE_ICONS: Record<string, (props: IconProps) => JSX.Element> = {
+  computer_use: MonitorIcon,
   exercise: ActivityIcon,
   step_count: FootstepsIcon,
   sleep_duration: BedIcon,
@@ -398,6 +426,7 @@ const VARIABLE_ICONS: Record<string, (props: IconProps) => JSX.Element> = {
   light_morning: SunIcon,
   light_evening: SunsetIcon,
   device_use: PhoneIcon,
+  tiktok: ShortVideoIcon,
   time_away: DoorExitIcon,
   location: PlaceIcon,
   day_of_week: CalendarIcon,

@@ -18,10 +18,15 @@ from zoneinfo import ZoneInfo
 from ..config.loader import get_config, resolve_timezone
 from ..config.schema import AppConfig
 from ..config.settings import Settings, get_settings
+from ..connectors.activitywatch.connector import (
+    SOURCE_ID as AW_SOURCE_ID,
+    SOURCE_NAME as AW_SOURCE_NAME,
+    ActivityWatchConnector,
+)
+from ..connectors.base import ConnectorResult
 from ..connectors.home_assistant.connector import (
     SOURCE_ID as HA_SOURCE_ID,
     SOURCE_NAME as HA_SOURCE_NAME,
-    ConnectorResult,
     HomeAssistantConnector,
 )
 from ..connectors.wearables.base import WearableProvider
@@ -42,9 +47,10 @@ logger = logging.getLogger(__name__)
 #: row names the MCP integration it corresponds to, so the sidebar matches the
 #: servers configured in the user's MCP client.
 #: Every MCP integration the timeline can read from, and how each contributes.
-#: `wearable_route` names the composite route that supplies body metrics;
-#: `home_lanes` marks the source that supplies environment, presence and
-#: location, which only Home Assistant can.
+#: `wearable_route` names the composite route that supplies body metrics — None
+#: for a source that is not a wearable at all; `home_lanes` marks the source
+#: that supplies environment, presence and location, which only Home Assistant
+#: can.
 SOURCE_CATALOGUE = {
     HA_SOURCE_ID: {
         "name": HA_SOURCE_NAME,
@@ -54,6 +60,11 @@ SOURCE_CATALOGUE = {
     "garmin": {
         "name": "Garmin",
         "wearable_route": "garmin_mcp",
+        "home_lanes": False,
+    },
+    AW_SOURCE_ID: {
+        "name": AW_SOURCE_NAME,
+        "wearable_route": None,
         "home_lanes": False,
     },
 }
@@ -67,6 +78,7 @@ SOURCE_ROW_OWNER = {
     HA_SOURCE_ID: HA_SOURCE_ID,
     "wearable_home_assistant": HA_SOURCE_ID,
     "garmin": "garmin",
+    AW_SOURCE_ID: AW_SOURCE_ID,
 }
 
 
@@ -170,6 +182,16 @@ class SyncService:
                     "provides": ["Sleep, heart rate, HRV, readiness, workouts"],
                 }
             )
+        if self.config.activitywatch.enabled:
+            items.append(
+                {
+                    "id": AW_SOURCE_ID,
+                    "name": AW_SOURCE_NAME,
+                    "mcpServer": self.config.activitywatch.mcp_server,
+                    "transport": "rest",
+                    "provides": ["Computer use: time at this machine, and in what"],
+                }
+            )
         return items
 
     def default_selection(self) -> list[str]:
@@ -177,6 +199,7 @@ class SyncService:
         by_route = {
             info["wearable_route"]: source_id
             for source_id, info in SOURCE_CATALOGUE.items()
+            if info["wearable_route"]
         }
         available = {item["id"] for item in self.available_sources()}
         ordered = [
@@ -190,13 +213,28 @@ class SyncService:
         return ordered
 
     def source_selection(self) -> list[str]:
-        """Chosen sources in priority order, filtered to those still available."""
+        """Chosen sources in priority order, filtered to those still available.
+
+        A source configured *after* the choice was made joins it, switched on
+        and last in priority. It was never offered, so leaving it out would
+        report a decision the user did not make — and a newly connected source
+        that silently contributes nothing is worse than one that has to be
+        switched off deliberately.
+        """
         available = [item["id"] for item in self.available_sources()]
         stored = self.repository.get_source_selection()
         if stored is None:
             return self.default_selection()
+
         # A source removed from config must not linger in a stored selection.
-        return [source_id for source_id in stored if source_id in available]
+        chosen = [source_id for source_id in stored if source_id in available]
+        offered = self.repository.known_sources()
+        chosen.extend(
+            source_id
+            for source_id in available
+            if source_id not in chosen and source_id not in offered
+        )
+        return chosen
 
     def set_source_selection(self, sources: list[str]) -> list[str]:
         available = [item["id"] for item in self.available_sources()]
@@ -206,7 +244,9 @@ class SyncService:
                 f"Unknown source(s): {', '.join(unknown)}. "
                 f"Available: {', '.join(available)}."
             )
-        chosen = self.repository.set_source_selection(sources)
+        # Everything on offer is recorded, not only what was picked, so a
+        # source left out now reads as declined rather than as new.
+        chosen = self.repository.set_source_selection(sources, known=available)
         # The provider is cached per process, so it has to be rebuilt for the
         # next fetch to actually use the new routes.
         self._reset_provider()
@@ -236,7 +276,7 @@ class SyncService:
         routes = [
             SOURCE_CATALOGUE[source_id]["wearable_route"]
             for source_id in selection
-            if source_id in SOURCE_CATALOGUE
+            if SOURCE_CATALOGUE.get(source_id, {}).get("wearable_route")
         ]
         if not routes or routes == list(self.config.wearable.routes):
             return self.config
@@ -254,23 +294,40 @@ class SyncService:
     def home_assistant_selected(self) -> bool:
         return HA_SOURCE_ID in self.source_selection()
 
-    def _connectors(self) -> tuple[HomeAssistantConnector, WearableConnector]:
+    def activitywatch_selected(self) -> bool:
+        return AW_SOURCE_ID in self.source_selection()
+
+    def _connectors(
+        self,
+    ) -> tuple[HomeAssistantConnector, WearableConnector, ActivityWatchConnector]:
         home_assistant = HomeAssistantConnector(
             self.config.home_assistant, self.settings, self.tz
         )
-        return home_assistant, WearableConnector(self._wearable_provider())
+        activitywatch = ActivityWatchConnector(
+            self.config.activitywatch, self.settings, self.tz
+        )
+        return home_assistant, WearableConnector(self._wearable_provider()), activitywatch
 
     # -- status ----------------------------------------------------------
 
     async def data_sources(self) -> DataSourceReport:
         """Report one row per MCP integration the timeline reads from."""
-        home_assistant, wearable = self._connectors()
+        home_assistant, wearable, activitywatch = self._connectors()
         selection = self.source_selection()
         if HA_SOURCE_ID in selection:
             ha_status, ha_detail = await home_assistant.check_status()
         else:
             # Never contact a source the user switched off, not even to probe it.
             ha_status, ha_detail = "disconnected", "Switched off in the MCPs panel."
+
+        if AW_SOURCE_ID in selection and self.config.activitywatch.enabled:
+            aw_status, aw_detail, aw_capabilities = await activitywatch.check_status()
+        else:
+            aw_status, aw_detail, aw_capabilities = (
+                "disconnected",
+                "Switched off in the MCPs panel.",
+                [],
+            )
 
         last_run = self.repository.last_sync()
         last_sync = last_run.completed_at if last_run else None
@@ -287,10 +344,28 @@ class SyncService:
                 detail=ha_detail,
                 last_sync=last_sync,
                 entity_count=len(self.config.home_assistant.entities.all_entity_ids()),
-                has_data=_lane_has_data(cached, ("environment", "presence", "location")),
+                has_data=_lane_has_data(
+                    cached, ("environment", "presence", "location", "phone_use", "tiktok")
+                ),
             ),
             await self._wearable_source(wearable, last_sync, cached),
         ]
+
+        if self.config.activitywatch.enabled:
+            sources.append(
+                DataSource(
+                    id=AW_SOURCE_ID,
+                    name=AW_SOURCE_NAME,
+                    status=aw_status,
+                    mcp_server=self.config.activitywatch.mcp_server,
+                    transport="mock" if self.settings.use_mock_data else "rest",
+                    capabilities=aw_capabilities,
+                    detail=aw_detail,
+                    last_sync=last_sync,
+                    entity_count=len(aw_capabilities),
+                    has_data=_lane_has_data(cached, ("computer_use",)),
+                )
+            )
 
         # Mark each row with whether it is switched on and where it sits in the
         # merge order, so the panel shows the arrangement rather than only the
@@ -396,7 +471,7 @@ class SyncService:
     async def warm_up(self) -> None:
         """Probe the wearable route once at startup so the first page is fast."""
         try:
-            _home_assistant, wearable = self._connectors()
+            _home_assistant, wearable, _activitywatch = self._connectors()
             await self._cached_capabilities(wearable.provider)
         except Exception as exc:  # noqa: BLE001 - warm-up is best effort
             logger.info("Wearable capability warm-up did not complete: %s", exc)
@@ -430,27 +505,49 @@ class SyncService:
         fetch_start = window.start - LOOKBACK
         fetch_end = window.end + LOOKAHEAD
 
-        home_assistant, wearable = self._connectors()
-        if self.home_assistant_selected():
-            ha_result, wearable_payload = await asyncio.gather(
-                home_assistant.fetch(fetch_start, fetch_end),
-                wearable.fetch(fetch_start, fetch_end),
-            )
-        else:
-            # Switched off in the MCPs panel. Not contacting it is the whole
-            # point, so the day is reconstructed from the rest and the home
-            # lanes say they were switched off rather than that they failed.
-            ha_result = ConnectorResult(
-                status="disconnected",
-                detail="Switched off in the MCPs panel.",
-                warnings=["Home Assistant is switched off, so its lanes are empty."],
-            )
-            wearable_payload = await wearable.fetch(fetch_start, fetch_end)
+        home_assistant, wearable, activitywatch = self._connectors()
 
-        warnings = list(ha_result.warnings) + list(wearable_payload.warnings)
-        errors = list(ha_result.errors) + list(wearable_payload.errors)
+        # Switching a source off means it is not contacted at all. That is the
+        # whole point of the switch, so the day is reconstructed from the rest
+        # and the affected lanes say they were switched off rather than that
+        # they failed.
+        async def read_home_assistant() -> ConnectorResult:
+            if not self.home_assistant_selected():
+                return ConnectorResult(
+                    status="disconnected",
+                    detail="Switched off in the MCPs panel.",
+                    warnings=["Home Assistant is switched off, so its lanes are empty."],
+                )
+            return await home_assistant.fetch(fetch_start, fetch_end)
 
-        raw_records: list[RawRecord] = list(ha_result.records) + list(wearable_payload.raw_records)
+        async def read_activitywatch() -> ConnectorResult:
+            if not self.config.activitywatch.enabled:
+                return ConnectorResult(
+                    status="disconnected",
+                    detail="ActivityWatch is disabled in config.yaml.",
+                )
+            if not self.activitywatch_selected():
+                return ConnectorResult(
+                    status="disconnected",
+                    detail="Switched off in the MCPs panel.",
+                    warnings=["ActivityWatch is switched off, so computer use is empty."],
+                )
+            return await activitywatch.fetch(fetch_start, fetch_end)
+
+        ha_result, wearable_payload, aw_result = await asyncio.gather(
+            read_home_assistant(),
+            wearable.fetch(fetch_start, fetch_end),
+            read_activitywatch(),
+        )
+
+        warnings = (
+            list(ha_result.warnings) + list(wearable_payload.warnings) + list(aw_result.warnings)
+        )
+        errors = list(ha_result.errors) + list(wearable_payload.errors) + list(aw_result.errors)
+
+        raw_records: list[RawRecord] = (
+            list(ha_result.records) + list(wearable_payload.raw_records) + list(aw_result.records)
+        )
         normalized = normalize(raw_records, fetch_start, fetch_end)
         warnings.extend(normalized.warnings)
 
@@ -467,6 +564,12 @@ class SyncService:
             normalized=normalized,
             wearable=wearable_payload,
             home_assistant_available=ha_result.status in {"connected", "mock_data"},
+            activitywatch_available=aw_result.status in {"connected", "mock_data"},
+            activitywatch_note=(
+                None
+                if aw_result.status in {"connected", "mock_data"} or not aw_result.detail
+                else f"ActivityWatch was not read for this day: {aw_result.detail}"
+            ),
             baselines=baselines,
         )
 
@@ -477,6 +580,8 @@ class SyncService:
             getattr(wearable.provider, "name", "mock"), WEARABLE_SOURCES["mock"]
         )["name"]
         sources_checked = [HA_SOURCE_NAME, wearable_name]
+        if self.config.activitywatch.enabled:
+            sources_checked.append(AW_SOURCE_NAME)
         derived_count = sum(
             1
             for lane in lanes

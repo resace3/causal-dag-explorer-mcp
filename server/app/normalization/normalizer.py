@@ -38,6 +38,7 @@ STATE_STREAMS = {
     "bed_occupancy",
     "door",
     "device_use",
+    "app_usage",
     "location",
     "place",
 }

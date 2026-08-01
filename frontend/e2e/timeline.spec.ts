@@ -7,26 +7,67 @@ import { expect, test, type Page } from '@playwright/test';
  * app is that it reports honestly whatever the configured sources returned.
  */
 
+/**
+ * Snapshot the user-drawn arrows, and afterwards remove whatever is new.
+ *
+ * A drag that misses its intended tier still writes a real edge, so a cleanup
+ * naming the expected pair leaves that miss behind to change the graph every
+ * later test sees. Diffing against a snapshot removes exactly what the test
+ * caused, and never an arrow the person drew themselves.
+ */
+const USER_EDGE_HELPERS = `
+  // The page opens on today, so anything comparing the API against what is on
+  // screen has to ask for the same day the page asked for.
+  window.displayedDay = async () => {
+    const days = await (await fetch('/api/days')).json();
+    return await (await fetch('/api/day/' + days.today)).json();
+  };
+  window.userEdgeKeys = async () => {
+    const body = await (await fetch('/api/dag/edges')).json();
+    return body.edges.filter((e) => e.origin === 'user').map((e) => e.source + '|' + e.target);
+  };
+  window.removeUserEdgesNotIn = async (keep) => {
+    const keys = await window.userEdgeKeys();
+    let removed = 0;
+    for (const key of keys) {
+      if (keep.includes(key)) continue;
+      const [source, target] = key.split('|');
+      await fetch(\`/api/dag/edges/\${source}/\${target}\`, { method: 'DELETE' });
+      removed += 1;
+    }
+    return removed;
+  };
+`;
+
+declare global {
+  interface Window {
+    displayedDay: () => Promise<any>;
+    userEdgeKeys: () => Promise<string[]>;
+    removeUserEdgesNotIn: (keep: string[]) => Promise<number>;
+  }
+}
+
 async function waitForTimeline(page: Page) {
+  await page.addInitScript(USER_EDGE_HELPERS);
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Yesterday', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Today', level: 1 })).toBeVisible();
   await expect(page.getByTestId('status-card')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('timeline-expanded')).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe('Yesterday timeline', () => {
-  test('renders the page shell with Yesterday as the only navigation item', async ({ page }) => {
+  test('renders the page shell with Today as the only navigation item', async ({ page }) => {
     await waitForTimeline(page);
 
     const nav = page.getByRole('navigation', { name: 'Main navigation' });
     await expect(nav.getByRole('button')).toHaveCount(1);
-    await expect(page.getByTestId('nav-yesterday')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('nav-today')).toHaveAttribute('aria-current', 'page');
 
     for (const forbidden of ['Home', 'Trends', 'Insights', 'Settings', 'Reports']) {
       await expect(nav.getByText(forbidden, { exact: true })).toHaveCount(0);
     }
 
-    await expect(page.getByText('Your data from yesterday, 12:00 AM to 11:59 PM')).toBeVisible();
+    await expect(page.getByText('Your data from today so far, from 12:00 AM')).toBeVisible();
     await expect(page.getByText('All times shown in your local time')).toBeVisible();
   });
 
@@ -34,45 +75,60 @@ test.describe('Yesterday timeline', () => {
     await waitForTimeline(page);
 
     const heading = page.getByRole('heading', { level: 1 });
-    await expect(heading).toHaveText('Yesterday');
+    await expect(heading).toHaveText('Today');
 
-    // Step back a few days from whatever "yesterday" is.
-    const yesterday = await page.evaluate(async () => {
+    // Step back a few days from whatever "today" is.
+    const today = await page.evaluate(async () => {
       const response = await fetch('/api/days');
-      return (await response.json()).yesterday as string;
+      return (await response.json()).today as string;
     });
-    const target = new Date(`${yesterday}T12:00:00Z`);
+    const target = new Date(`${today}T12:00:00Z`);
     target.setUTCDate(target.getUTCDate() - 3);
     const iso = target.toISOString().slice(0, 10);
 
     await page.getByTestId(`calendar-day-${iso}`).click();
-    await expect(heading).not.toHaveText('Yesterday', { timeout: 60_000 });
+    await expect(heading).not.toHaveText('Today', { timeout: 60_000 });
     await expect(page.getByTestId('timeline-expanded').or(page.getByText(/No data source/))).toBeVisible({
       timeout: 60_000,
     });
 
-    // The Yesterday item goes back.
-    await page.getByTestId('nav-yesterday').click();
-    await expect(heading).toHaveText('Yesterday', { timeout: 60_000 });
+    // The Today item goes back.
+    await page.getByTestId('nav-today').click();
+    await expect(heading).toHaveText('Today', { timeout: 60_000 });
   });
 
-  test('builds an expected DAG for an outcome and exposure', async ({ page }) => {
+  test('shows the whole model, with no question to configure first', async ({ page }) => {
     await waitForTimeline(page);
 
     await page.getByTestId('mode-dag').click();
     const dag = page.getByTestId('timeline-dag');
     await expect(dag).toBeVisible();
-
-    // Outcome alone is enough to get a graph.
     await expect(dag.locator('[data-testid^="dag-node-"]').first()).toBeVisible({
       timeout: 30_000,
     });
 
-    // Naming an exposure adds the roles that only exist relative to one.
-    await page.getByTestId('dag-exposure').selectOption('exercise');
-    await expect(dag.getByTestId('dag-row-sleep_duration')).toBeVisible({ timeout: 30_000 });
-    await expect(dag.getByTestId('dag-row-exercise')).toContainText('Exposure');
-    await expect(dag.getByTestId('dag-row-sleep_duration')).toContainText('Outcome');
+    // Nothing to pick before there is a graph, and no mode to enter before an
+    // arrow can be drawn.
+    await expect(page.getByTestId('dag-outcome')).toHaveCount(0);
+    await expect(page.getByTestId('dag-exposure')).toHaveCount(0);
+    await expect(page.getByTestId('dag-edit-toggle')).toHaveCount(0);
+
+    // The rows are the timeline's rows and nothing else: no variable of a lane
+    // this day has no data for, and none of the ones no lane observes at all.
+    await expect(dag.getByTestId('dag-row-stress')).toHaveCount(0);
+    await expect(dag.getByTestId('dag-row-alcohol')).toHaveCount(0);
+
+    const laneIds = await page.evaluate(async () => {
+      const body = await window.displayedDay();
+      return body.lanes
+        .filter((lane: { available: boolean }) => lane.available)
+        .map((lane: { id: string }) => lane.id);
+    });
+    const rowLanes = await dag
+      .locator('[data-testid^="dag-row-"]')
+      .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? '').trim()));
+    expect(rowLanes.length).toBeGreaterThan(0);
+    expect(laneIds.length).toBeGreaterThan(0);
 
     // A node opens its own explanation.
     await dag.locator('[data-testid^="dag-node-"]').first().click();
@@ -81,6 +137,58 @@ test.describe('Yesterday timeline', () => {
     // Switching back leaves the timeline intact.
     await page.getByTestId('mode-expanded').click();
     await expect(page.getByTestId('timeline-expanded')).toBeVisible();
+  });
+
+  test('has exactly the expanded tab\u2019s rows, with the same names in the same order', async ({
+    page,
+  }) => {
+    await waitForTimeline(page);
+
+    const read = (selector: string) =>
+      page.locator(selector).evaluateAll((nodes) =>
+        nodes.map((node) => ({
+          id: (node as HTMLElement).dataset.testid ?? '',
+          name: node.querySelector('span.font-semibold')?.textContent?.trim() ?? '',
+        })),
+      );
+
+    const expanded = (await read('[data-testid^="lane-label-"]')).map((row) => ({
+      id: row.id.replace('lane-label-', ''),
+      name: row.name,
+    }));
+    expect(expanded.length).toBeGreaterThan(0);
+
+    await page.getByTestId('mode-dag').click();
+    await expect(page.locator('[data-testid^="dag-row-"]').first()).toBeVisible({
+      timeout: 60_000,
+    });
+    const dagRows = (await read('[data-testid^="dag-row-"]')).map((row) => ({
+      id: row.id.replace('dag-row-', ''),
+      name: row.name,
+    }));
+
+    // Not a subset, not a superset, not reordered: the same rows.
+    expect(dagRows).toEqual(expanded);
+
+    // And the model really does hold variables that were left out, or the
+    // check above would pass simply because nothing extra came back.
+    const omitted = await page.evaluate(async () => {
+      const day = await window.displayedDay();
+      const dag = await (
+        await fetch('/api/dag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day: day.date }),
+        })
+      ).json();
+      const drawn = new Set(
+        day.lanes.filter((l: { available: boolean }) => l.available).map((l: { id: string }) => l.id),
+      );
+      return (dag.timeline?.rows ?? []).filter(
+        (row: { lane: string | null }) => !row.lane || !drawn.has(row.lane),
+      ).length;
+    });
+    expect(omitted).toBeGreaterThan(0);
   });
 
   test('places DAG nodes on the same clock as the timeline', async ({ page }) => {
@@ -145,7 +253,24 @@ test.describe('Yesterday timeline', () => {
     await expect(page.getByTestId('add-row-submit')).toBeDisabled();
 
     // A readable one shows what it understood before anything happens.
-    await page.getByTestId('add-row-prompt').fill('heart rate below 50');
+    //
+    // The stream is chosen from what this day actually holds rather than
+    // named outright: a threshold needs a numeric series, and which sources
+    // publish one varies by day — a wearable that reports a single resting
+    // heart rate for the day offers no curve to compare against, and the app
+    // is right to refuse that rather than invent one.
+    const stream = await page.evaluate(async () => {
+      const body = await window.displayedDay();
+      for (const lane of body.lanes) {
+        for (const series of lane.series ?? []) {
+          if ((series.points ?? []).length > 2) return series.label as string;
+        }
+      }
+      return null;
+    });
+    test.skip(!stream, 'This day published no continuous series to threshold against.');
+
+    await page.getByTestId('add-row-prompt').fill(`${stream} below 50`);
     await expect(reading).toContainText(/Understood as/, { timeout: 15_000 });
     await expect(reading).toContainText(/below 50/);
     await expect(page.getByTestId('add-row-submit')).toBeEnabled();
@@ -169,20 +294,34 @@ test.describe('Yesterday timeline', () => {
   });
 
   test('draws a causal arrow by dragging between rows', async ({ page }) => {
-    // Editing lists every variable, so both ends of the drag need to fit.
     await page.setViewportSize({ width: 1400, height: 1200 });
     await waitForTimeline(page);
     await page.getByTestId('mode-dag').click();
     const dag = page.getByTestId('timeline-dag');
     await expect(dag).toBeVisible();
-    await page.getByTestId('dag-edit-toggle').click();
+    await expect(dag.locator('[data-testid^="dag-row-"]').first()).toBeVisible({
+      timeout: 30_000,
+    });
 
-    // Editing gives every variable a row, including ones with no data today —
-    // otherwise the arrows most worth adding could never be drawn.
-    const anchor = page.getByTestId('dag-anchor-stress');
-    await expect(anchor).toBeVisible({ timeout: 30_000 });
+    // Both ends have to be rows the day is drawing, since the rows are now
+    // exactly the timeline's. These two share the Sleep lane, so they are on
+    // screen together whenever sleep was recorded, and the model has no arrow
+    // between them in either direction — one that already existed would be
+    // refused as a duplicate rather than drawn.
+    const source = 'sleep_efficiency';
+    const target = 'sleep_onset';
+    const edgesBefore = await page.evaluate(() => userEdgeKeys());
+    // Both are tiers inside the Sleep row rather than rows of their own, so
+    // their presence is checked by the handle each one carries.
+    const present = await page.evaluate(
+      ([a, b]) =>
+        Boolean(document.querySelector(`[data-testid="dag-handle-${a}"]`)) &&
+        Boolean(document.querySelector(`[data-testid="dag-handle-${b}"]`)),
+      [source, target],
+    );
+    test.skip(!present, 'This day drew no sleep tiers to connect.');
 
-    const handle = page.getByTestId('dag-handle-stress');
+    const handle = page.getByTestId(`dag-handle-${source}`).locator('visible=true').first();
     await handle.scrollIntoViewIfNeeded();
     const from = await handle.boundingBox();
     expect(from).not.toBeNull();
@@ -192,64 +331,95 @@ test.describe('Yesterday timeline', () => {
     await page.mouse.move(from!.x + 150, from!.y + 40, { steps: 10 });
 
     // Whole rows are the drop target, and only exist mid-drag.
-    const drop = page.getByTestId('dag-drop-device_use');
-    const to = await drop.boundingBox();
-    expect(to).not.toBeNull();
-    await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 10 });
+    const drop = page.getByTestId(`dag-drop-${target}`);
+    await expect(drop).toBeAttached({ timeout: 10_000 });
+    await drop.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+
+    // Twice, re-reading the box between: a pointer near the edge of the window
+    // makes the view auto-scroll itself — which is what lets a drag reach a row
+    // off the bottom — so the first position can be stale by the time the
+    // pointer arrives, and the release then lands on no row at all.
+    for (const steps of [10, 4]) {
+      const to = await drop.boundingBox();
+      expect(to).not.toBeNull();
+      await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps });
+      await page.waitForTimeout(150);
+    }
     await page.mouse.up();
 
     // The arrow is now in the model, and labelled as the user's.
     await expect
       .poll(
         async () =>
-          page.evaluate(async () => {
-            const response = await fetch('/api/dag/edges');
-            const body = await response.json();
-            return body.edges.filter(
-              (edge: { source: string; target: string; origin: string }) =>
-                edge.source === 'stress' && edge.target === 'device_use',
-            ).length;
-          }),
+          page.evaluate(
+            async ([a, b]) => {
+              const body = await (await fetch('/api/dag/edges')).json();
+              return body.edges.filter(
+                (edge: { source: string; target: string }) =>
+                  edge.source === a && edge.target === b,
+              ).length;
+            },
+            [source, target],
+          ),
         { timeout: 20_000 },
       )
       .toBe(1);
 
-    // Clean up so the run is repeatable.
-    await page.evaluate(() =>
-      fetch('/api/dag/edges/stress/device_use', { method: 'DELETE' }),
-    );
+    // Clean up so the run is repeatable: whatever this test added, whether or
+    // not it was the pair asked for.
+    await page.evaluate((keep) => removeUserEdgesNotIn(keep), edgesBefore);
   });
 
   test('refuses a dragged arrow that would create a cycle, and says why', async ({ page }) => {
     await page.setViewportSize({ width: 1400, height: 1200 });
     await waitForTimeline(page);
+    const edgesBefore = await page.evaluate(() => userEdgeKeys());
     await page.getByTestId('mode-dag').click();
-    await page.getByTestId('dag-edit-toggle').click();
-    await expect(page.getByTestId('dag-anchor-stress')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('dag-row-sleep')).toBeVisible({ timeout: 30_000 });
 
     // sleep_onset -> sleep_duration is in the model, so the reverse closes a
-    // loop. Both are on screen for this outcome.
-    const handle = page.getByTestId('dag-handle-sleep_duration').first();
+    // loop. Both share the Sleep lane, so both are on screen together.
+    //
+    // A variable can carry more than one handle, so the visible one is picked
+    // rather than whichever comes first in the DOM: pressing on a handle that
+    // is scrolled out of view starts no drag, and the failure then surfaces
+    // much later as a missing drop row.
+    const handle = page
+      .getByTestId('dag-handle-sleep_duration')
+      .locator('visible=true')
+      .first();
     await handle.scrollIntoViewIfNeeded();
+    await expect(handle).toBeVisible();
     const from = await handle.boundingBox();
     await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
     await page.mouse.down();
     await page.mouse.move(from!.x + 120, from!.y + 30, { steps: 8 });
-    const to = await page.getByTestId('dag-drop-sleep_onset').boundingBox();
+
+    // Drop rows only exist mid-drag, so their presence is the proof that the
+    // press above actually began one.
+    const dropRow = page.getByTestId('dag-drop-sleep_onset');
+    await expect(dropRow).toBeVisible({ timeout: 10_000 });
+    const to = await dropRow.boundingBox();
     await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 8 });
     await page.mouse.up();
 
     const error = page.getByTestId('dag-edit-error');
     await expect(error).toBeVisible({ timeout: 20_000 });
     await expect(error).toContainText(/cycle/i);
+
+    // A refused drag writes nothing, but a drag that missed the intended tier
+    // would have written something real. Leave no arrow behind either way.
+    await page.evaluate((keep) => removeUserEdgesNotIn(keep), edgesBefore);
   });
 
   test('keeps the DAG to the graph itself, with no prose below it', async ({ page }) => {
     await waitForTimeline(page);
     await page.getByTestId('mode-dag').click();
     const dag = page.getByTestId('timeline-dag');
-    await page.getByTestId('dag-exposure').selectOption('exercise');
-    await expect(dag.getByTestId('dag-row-sleep_duration')).toBeVisible({ timeout: 30_000 });
+    await expect(dag.locator('[data-testid^="dag-row-"]').first()).toBeVisible({
+      timeout: 30_000,
+    });
 
     for (const removed of [
       /not on this day.s clock/i,
@@ -263,6 +433,31 @@ test.describe('Yesterday timeline', () => {
 
     // The graph and its legend are what remain.
     await expect(dag.getByText(/Immediate — within 2 hours/)).toBeVisible();
+  });
+
+  test('draws computer use as its own lane, down to the rule behind a mark', async ({ page }) => {
+    await waitForTimeline(page);
+
+    const plot = page.getByTestId('lane-plot-computer_use');
+    // ActivityWatch holds nothing from before it was installed, so on a live
+    // install the displayed day can legitimately predate it. A lane that hides
+    // itself and says why is the correct behaviour there, and is covered by the
+    // backend suite; there is nothing to draw for this test to check.
+    test.skip(
+      (await plot.count()) === 0,
+      'ActivityWatch recorded nothing for the displayed day.',
+    );
+
+    await expect(page.getByTestId('lane-label-computer_use')).toContainText('Computer Use');
+    const marks = plot.locator('.tl-mark');
+    // Three tiers — at the machine, in an application, on a site — so a lane
+    // with only one kind of mark means two of them silently stopped rendering.
+    expect(await marks.count()).toBeGreaterThan(2);
+
+    await marks.first().click();
+    const panel = page.getByTestId('details-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText(/computer_use\./)).toBeVisible();
   });
 
   test('no longer shows the observed-timing narrative', async ({ page }) => {
@@ -302,7 +497,11 @@ test.describe('Yesterday timeline', () => {
     const popover = page.getByTestId('source-picker-popover');
     await expect(popover).toBeVisible();
 
-    // Order is the merge priority, so moving one has to change the stored order.
+    // Order is the merge priority, so moving one has to change the stored
+    // order. Only the two it swaps are named: any further sources keep their
+    // places, and asserting the whole list against a two-source install is how
+    // this test broke when a third MCP was connected.
+    const rest = before.slice(2);
     await page.getByTestId(`source-up-${before[1]}`).click();
     await expect
       .poll(async () =>
@@ -310,7 +509,7 @@ test.describe('Yesterday timeline', () => {
           (await (await fetch('/api/sources/selection')).json()).selected.join(','),
         ),
       )
-      .toBe([before[1], before[0]].join(','));
+      .toBe([before[1], before[0], ...rest].join(','));
 
     // Switching one off removes it from the selection entirely.
     await page.getByTestId(`source-toggle-${before[0]}`).click();
@@ -320,7 +519,7 @@ test.describe('Yesterday timeline', () => {
           (await (await fetch('/api/sources/selection')).json()).selected,
         ),
       )
-      .toEqual([before[1]]);
+      .toEqual([before[1], ...rest]);
 
     // A source that was never contacted must not report itself as connected.
     const off = await page.evaluate(
@@ -363,6 +562,38 @@ test.describe('Yesterday timeline', () => {
       nodes.map((node) => node.querySelector('svg')?.getAttribute('width')),
     );
     expect(new Set(widths).size).toBe(1);
+  });
+
+  test('draws the phone rows, the followed app directly under the one it is part of', async ({
+    page,
+  }) => {
+    await waitForTimeline(page);
+
+    const laneIds = async (prefix: string) =>
+      page
+        .locator(`[data-testid^="${prefix}"]`)
+        .evaluateAll((nodes, strip: string) =>
+          nodes.map((node) => node.getAttribute('data-testid')!.slice(strip.length)),
+        prefix);
+
+    const rows = await laneIds('lane-label-');
+    test.skip(!rows.includes('phone_use'), 'this day recorded no phone use');
+
+    const plot = page.getByTestId('lane-plot-phone_use');
+    await expect(plot).toBeVisible();
+    // The row states what it measured rather than only drawing it.
+    await expect(plot.getByText(/with the screen on/)).toBeVisible();
+
+    if (!rows.includes('tiktok')) return;
+
+    // The followed app is a subset of phone use, not a parallel measurement, so
+    // it sits directly beneath the row it came out of — on both tabs.
+    expect(rows.indexOf('tiktok')).toBe(rows.indexOf('phone_use') + 1);
+
+    await page.getByTestId('mode-dag').click();
+    await expect(page.getByTestId('dag-row-phone_use')).toBeVisible({ timeout: 30_000 });
+    const dagRows = await laneIds('dag-row-');
+    expect(dagRows.indexOf('tiktok')).toBe(dagRows.indexOf('phone_use') + 1);
   });
 
   test('opens the details panel for an event and closes it again', async ({ page }) => {
@@ -426,7 +657,8 @@ test.describe('Yesterday timeline', () => {
     await page.getByTestId('mode-collapsed').click();
     await expect(page.getByTestId('timeline-collapsed')).toBeVisible();
     await expect(page.getByTestId('timeline-expanded')).toHaveCount(0);
-    await expect(page.getByText('Major events')).toBeVisible();
+    // Exact: the "Major events only" switch beside it is a different control.
+    await expect(page.getByText('Major events', { exact: true })).toBeVisible();
 
     // The selection survives the mode change.
     await expect(page.getByTestId('details-panel').getByRole('heading', { level: 2 })).toHaveText(
@@ -438,6 +670,130 @@ test.describe('Yesterday timeline', () => {
     await expect(page.getByTestId('details-panel').getByRole('heading', { level: 2 })).toHaveText(
       selectedTitle ?? '',
     );
+  });
+
+  test('opens a collapsed mark from its caption, including one from another day', async ({
+    page,
+  }) => {
+    await waitForTimeline(page);
+    await page.getByTestId('mode-collapsed').click();
+    await expect(page.getByTestId('collapsed-phenotypes')).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(2000);
+
+    const marks = page.locator('[data-testid="collapsed-scroller"] .tl-mark');
+    expect(await marks.count()).toBeGreaterThan(0);
+
+    // The caption is the most obvious thing to click, and it used to sit in a
+    // group that ignored pointer events — so clicking an event's own name did
+    // nothing at all.
+    const captioned = marks.filter({ has: page.locator('text') }).first();
+    await captioned.scrollIntoViewIfNeeded();
+    const caption = captioned.locator('text').first();
+    await expect(caption).toBeVisible();
+    await caption.click();
+    await expect(page.getByTestId('details-panel')).toBeVisible();
+
+    // A mark can belong to any day in the two-month window. The page used to
+    // re-resolve every selection against the day it was displaying, fail to
+    // find one from a neighbour, and close the panel the instant it opened.
+    const otherDay = page.getByTestId('details-other-day');
+    const dayCount = await page.locator('[data-testid^="collapsed-day-"]').count();
+    if (dayCount > 1 || (await otherDay.count())) {
+      const heading = await page
+        .getByTestId('details-panel')
+        .getByRole('heading', { level: 2 })
+        .textContent();
+      expect(heading?.trim()).toBeTruthy();
+      // When it is from another day, the panel has to say so rather than
+      // showing its times under the heading of the day on screen.
+      if (await otherDay.count()) {
+        await expect(otherDay).toContainText(/not the day on screen/);
+      }
+    }
+  });
+
+  test('comes back to the tab you were on', async ({ page }) => {
+    await waitForTimeline(page);
+    await page.getByTestId('mode-collapsed').click();
+    await expect(page.getByTestId('timeline-collapsed')).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByTestId('timeline-collapsed')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('timeline-expanded')).toHaveCount(0);
+
+    await page.getByTestId('mode-expanded').click();
+    await expect(page.getByTestId('timeline-expanded')).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId('timeline-expanded')).toBeVisible({ timeout: 60_000 });
+  });
+
+  test('can bring anything from the expanded tab onto the collapsed one', async ({ page }) => {
+    await waitForTimeline(page);
+
+    // Lanes holding at least one event. A lane that is only a continuous line
+    // is excluded on purpose: one row of marks cannot draw a curve, and picking
+    // a moment out of it to stand for the whole would be inventing salience.
+    const expandedLanes = await page.evaluate(async () => {
+      const body = await window.displayedDay();
+      return body.lanes
+        .filter((lane: { available: boolean; events: unknown[] }) => lane.available && lane.events.length)
+        .map((lane: { id: string }) => lane.id);
+    });
+    expect(expandedLanes.length).toBeGreaterThan(0);
+
+    await page.getByTestId('mode-collapsed').click();
+    await expect(page.getByTestId('timeline-collapsed')).toBeVisible();
+    await expect(page.getByTestId('collapsed-phenotypes')).toBeVisible({ timeout: 30_000 });
+
+    // Every one of them has a switch here, whether or not its events are in the
+    // curated "major" list.
+    for (const laneId of expandedLanes) {
+      await expect(page.getByTestId(`collapsed-toggle-${laneId}`)).toBeVisible();
+    }
+
+    // A lane that is off can be switched on, and then draws something.
+    // Resolved to a fixed testid first: a locator selecting on aria-pressed
+    // stops matching the moment the click lands and silently re-resolves to
+    // the next switched-off lane.
+    const offId = await page
+      .locator('[data-testid^="collapsed-toggle-"][aria-pressed="false"]')
+      .first()
+      .getAttribute('data-testid')
+      .catch(() => null);
+
+    if (offId) {
+      const toggle = page.getByTestId(offId);
+      const before = await page.locator('[data-testid="collapsed-scroller"] .tl-mark').count();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+      await expect
+        .poll(async () => page.locator('[data-testid="collapsed-scroller"] .tl-mark').count())
+        .toBeGreaterThan(before);
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    }
+
+    // And the curation itself can be dropped for everything the lanes hold.
+    //
+    // The count is asserted not to *fall*, rather than to rise: on a day whose
+    // lanes happen to hold only major events there is genuinely nothing extra
+    // to reveal, and a test demanding more would be demanding data. What must
+    // hold on every day is that the switch flips and the row says which of the
+    // two it is showing.
+    const all = page.getByTestId('collapsed-all-events');
+    const before = await page.locator('[data-testid="collapsed-scroller"] .tl-mark').count();
+    await expect(page.getByText('Major events', { exact: true })).toBeVisible();
+
+    await all.click();
+    await expect(all).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByText('Every event', { exact: true }).first()).toBeVisible();
+    await expect
+      .poll(async () => page.locator('[data-testid="collapsed-scroller"] .tl-mark').count())
+      .toBeGreaterThanOrEqual(before);
+
+    await all.click();
+    await expect(all).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByText('Major events', { exact: true })).toBeVisible();
   });
 
   test('hides and restores a lane from the visible data streams control', async ({ page }) => {
@@ -454,6 +810,127 @@ test.describe('Yesterday timeline', () => {
 
     await firstCheckbox.check();
     await expect(page.locator('[data-testid^="lane-plot-"]')).toHaveCount(before);
+  });
+
+  test('a row hidden on Expanded is gone from Collapsed and the DAG too', async ({ page }) => {
+    await waitForTimeline(page);
+
+    // A lane with events, so it has a switch on the collapsed tab to lose, and
+    // one the DAG draws rows for, so there is something there to lose as well.
+    // Computer Use qualifies for the first and not the second: no variable in
+    // the causal model is observed through it.
+    const laneId = await page.evaluate(async () => {
+      const day = await window.displayedDay();
+      const dag = await (
+        await fetch('/api/dag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day: day.date }),
+        })
+      ).json();
+      const withRows = new Set(
+        (dag.timeline?.rows ?? []).map((row: { lane: string | null }) => row.lane),
+      );
+      const lane = day.lanes.find(
+        (item: { available: boolean; events: unknown[]; id: string }) =>
+          item.available && item.events.length && withRows.has(item.id),
+      );
+      return lane?.id ?? null;
+    });
+    test.skip(!laneId, 'No lane on this day carries both events and a causal variable.');
+
+    // Confirm it is offered everywhere before hiding it, or the assertions
+    // below would pass against a lane that was never there.
+    await page.getByTestId('mode-collapsed').click();
+    await expect(page.getByTestId(`collapsed-toggle-${laneId}`)).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('mode-dag').click();
+    await expect(page.locator('[data-testid^="dag-row-"]').first()).toBeVisible({
+      timeout: 60_000,
+    });
+    const dagRowsBefore = await page
+      .locator('[data-testid^="dag-row-"]')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => (node as HTMLElement).dataset.testid!.replace('dag-row-', '')),
+      );
+
+    await page.getByTestId('mode-expanded').click();
+    await expect(page.getByTestId('timeline-expanded')).toBeVisible();
+    await page.getByTestId('stream-visibility-toggle').click();
+    await page.getByTestId(`stream-visibility-${laneId}`).uncheck();
+    await expect(page.getByTestId(`lane-plot-${laneId}`)).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    // Collapsed: no switch at all, not merely a switch turned off.
+    await page.getByTestId('mode-collapsed').click();
+    await expect(page.getByTestId('timeline-collapsed')).toBeVisible();
+    await expect(page.getByTestId(`collapsed-toggle-${laneId}`)).toHaveCount(0);
+
+    // DAG: the variables observed through that lane lose their rows, and the
+    // rows belonging to lanes still on the timeline are untouched.
+    await page.getByTestId('mode-dag').click();
+    await expect(page.locator('[data-testid^="dag-row-"]').first()).toBeVisible({
+      timeout: 60_000,
+    });
+    const dagRowsAfter = await page
+      .locator('[data-testid^="dag-row-"]')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => (node as HTMLElement).dataset.testid!.replace('dag-row-', '')),
+      );
+    expect(dagRowsAfter.length).toBeLessThan(dagRowsBefore.length);
+    expect(dagRowsAfter.every((row) => dagRowsBefore.includes(row))).toBe(true);
+
+    // Restoring it brings all three back.
+    await page.getByTestId('mode-expanded').click();
+    await page.getByTestId('stream-visibility-toggle').click();
+    await page.getByTestId(`stream-visibility-${laneId}`).check();
+    await expect(page.getByTestId(`lane-plot-${laneId}`)).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    await page.getByTestId('mode-collapsed').click();
+    await expect(page.getByTestId(`collapsed-toggle-${laneId}`)).toBeVisible();
+    await page.getByTestId('mode-dag').click();
+    await expect
+      .poll(async () => page.locator('[data-testid^="dag-row-"]').count(), { timeout: 30_000 })
+      .toBe(dagRowsBefore.length);
+  });
+
+  test('remembers a hidden row across a reload and into another tab', async ({ page, context }) => {
+    await waitForTimeline(page);
+
+    const before = await page.locator('[data-testid^="lane-plot-"]').count();
+    test.skip(before < 2, 'Needs at least two lanes to hide one.');
+
+    // Hide the second row from its own × — the control that made the arrangement.
+    const hiddenId = await page
+      .locator('[data-testid^="lane-label-"]')
+      .nth(1)
+      .evaluate((node) => (node as HTMLElement).dataset.testid!.replace('lane-label-', ''));
+    await page.getByTestId(`lane-label-${hiddenId}`).hover();
+    await page.getByTestId(`lane-hide-${hiddenId}`).click();
+    await expect(page.getByTestId(`lane-plot-${hiddenId}`)).toHaveCount(0);
+
+    // A reload must not quietly bring it back: the arrangement is the user's,
+    // and one that resets is a control not worth using.
+    await page.reload();
+    await expect(page.getByTestId('timeline-expanded')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId(`lane-plot-${hiddenId}`)).toHaveCount(0);
+
+    // Nor may a second tab show a different arrangement of the same day.
+    const other = await context.newPage();
+    try {
+      await other.goto('/');
+      await expect(other.getByTestId('timeline-expanded')).toBeVisible({ timeout: 60_000 });
+      await expect(other.getByTestId(`lane-plot-${hiddenId}`)).toHaveCount(0);
+
+      // Restoring it in one tab reaches the other, so the older tab cannot
+      // later write its stale arrangement back over this one.
+      await other.getByTestId('stream-visibility-toggle').click();
+      await other.getByTestId(`stream-visibility-${hiddenId}`).check();
+      await expect(other.getByTestId(`lane-plot-${hiddenId}`)).toBeVisible();
+      await expect(page.getByTestId(`lane-plot-${hiddenId}`)).toBeVisible({ timeout: 15_000 });
+    } finally {
+      await other.close();
+    }
   });
 
   test('refreshes the data without losing the page', async ({ page }) => {

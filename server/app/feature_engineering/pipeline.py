@@ -15,14 +15,17 @@ from .context import RuleContext
 from .provenance import coverage_fraction
 from .rules import (
     activity,
+    computer_use,
     heart_rate,
     hrv,
     light,
     location,
+    phone_use,
     presence,
     readiness,
     sleep,
     temperature,
+    tiktok,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,11 @@ RULES = (
     ("temperature", temperature.build_lane),
     ("environment", light.build_lane),
     ("presence", presence.build_lane),
+    ("computer_use", computer_use.build_lane),
+    # The two screen rows sit together, and TikTok directly under the phone row
+    # it is a subset of, so the whole and the part read as one block.
+    ("phone_use", phone_use.build_lane),
+    ("tiktok", tiktok.build_lane),
     ("location", location.build_lane),
 )
 
@@ -49,6 +57,9 @@ FALLBACK_LANE_META = {
     "temperature": ("Temperature", "Wearable temperature sensor", "teal"),
     "environment": ("Environment", "Home conditions", "sky"),
     "presence": ("Presence & Motion", "Home occupancy signals", "cyan"),
+    "computer_use": ("Computer Use", "Time at this machine, and in what", "amber"),
+    "phone_use": ("Phone Use", "Screen-on stretches, and what was open", "fuchsia"),
+    "tiktok": ("TikTok", "Spells in the app, on the phone", "rose"),
     "location": ("Phone Location", "Zone and place name", "indigo"),
 }
 

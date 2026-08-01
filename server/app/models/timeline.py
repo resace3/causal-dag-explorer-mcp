@@ -27,6 +27,9 @@ Phenotype = Literal[
     "temperature",
     "environment",
     "presence",
+    "computer_use",
+    "phone_use",
+    "tiktok",
     "location",
 ]
 

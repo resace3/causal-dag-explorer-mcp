@@ -101,7 +101,13 @@ GROUNDINGS: dict[str, tuple[Grounding, ...]] = {
     ),
     "room_temperature": (Grounding(lane="environment", categories=("temperature",)),),
     "skin_temperature": (Grounding(lane="temperature"),),
-    "device_use": (Grounding(lane="presence", categories=("device_use",)),),
+    "device_use": (Grounding(lane="phone_use", categories=("phone_on",)),),
+    # The screen-on stretches, not the individual application spells inside
+    # them — the same choice the computer lane makes one line down.
+    "tiktok": (Grounding(lane="tiktok", categories=("tiktok",)),),
+    # Stretches at the machine, not the individual application spells: one row
+    # per browser tab would bury the graph and says nothing a session does not.
+    "computer_use": (Grounding(lane="computer_use", categories=("at_computer",)),),
     "time_away": (Grounding(lane="presence", categories=("presence_away",)),),
     "location": (Grounding(lane="location", categories=("place",)),),
 }

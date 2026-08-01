@@ -24,6 +24,7 @@ ENTITY_GROUPS = (
     "sleep",
     "door",
     "device_use",
+    "app_usage",
     "steps",
     "resting_heart_rate",
     "heart_rate",
@@ -74,6 +75,14 @@ class HomeAssistantEntities(StrictModel):
 
     device_use: list[str] = Field(default_factory=list)
     """Binary sensors that indicate the user is actively using a device."""
+
+    app_usage: list[str] = Field(default_factory=list)
+    """Sensors naming the application in front on a phone.
+
+    The Home Assistant companion app's "last used app" sensor reports an Android
+    package name. It holds that value after the screen goes off, so it is only
+    ever read together with a `device_use` sensor — see `PhoneAppRule`.
+    """
 
     steps: list[str] = Field(default_factory=list)
     """Cumulative daily step counters (they reset to zero at midnight)."""
@@ -146,6 +155,44 @@ class HomeAssistantConfig(StrictModel):
     """
 
     entities: HomeAssistantEntities = Field(default_factory=HomeAssistantEntities)
+
+
+class ActivityWatchConfig(StrictModel):
+    """Computer use, read from a local ActivityWatch server.
+
+    ActivityWatch records which application had focus and whether the keyboard
+    and mouse were idle. That is the most revealing stream this application can
+    read, so how much of it is kept is a deliberate, recorded choice — the same
+    treatment `phone_location.include_street_address` gets.
+    """
+
+    enabled: bool = True
+    mcp_server: str = "activitywatch"
+    """Name of the ActivityWatch MCP server, shown in the MCPs panel.
+
+    Events are read over the local REST API the MCP server itself wraps; this
+    records which MCP integration the same server corresponds to.
+    """
+
+    detail: Literal["app", "domain", "full"] = "domain"
+    """How much of each window and browser tab is kept.
+
+    * `app` — the application name only (`chrome.exe`). Browsing is not read.
+    * `domain` — plus the website a browser tab was on, reduced to its domain.
+    * `full` — plus window titles and complete URLs.
+
+    Window titles quote document names, message subjects and search queries, so
+    `full` is off unless it is asked for. Every event records which level
+    produced it.
+    """
+
+    hostname: str | None = None
+    """Which machine's buckets to read, when one server collects several.
+
+    Left unset, the alphabetically first host that has a window bucket is used
+    and the others are named in a warning rather than silently merged — two
+    machines' focus histories are not one timeline.
+    """
 
 
 class JsonFileProviderConfig(StrictModel):
@@ -336,9 +383,89 @@ class StepActivityRule(StrictModel):
 
 
 class DeviceUseRule(StrictModel):
+    """Screen-on stretches — the top tier of the Phone Use lane."""
+
     rule_version: str = "1.0.0"
     min_session_minutes: float = 2.0
     merge_within_minutes: float = 5.0
+
+
+class PhoneAppRule(StrictModel):
+    """Which application was in front on the phone.
+
+    The companion app's "last used app" sensor holds its value after the screen
+    goes off, so a package name can sit there all night. Every spell is
+    intersected with the screen-on signal before it is drawn — without that, a
+    phone put down at eleven reads as eight hours in whatever was open last.
+    That makes the screen sensor a hard requirement, not a refinement: with no
+    `device_use` entity the lane says so rather than drawing the unclipped runs.
+    """
+
+    rule_version: str = "1.0.0"
+
+    min_app_minutes: float = 1.0
+    """Shortest spell in one application worth naming. Below this the time is
+    still inside the screen-on stretch above it, so nothing is lost."""
+
+    merge_within_minutes: float = 2.0
+    """Runs of the same application separated by less than this are one spell.
+    Dropping to the home screen and straight back is not two sessions."""
+
+
+class TrackedAppRule(StrictModel):
+    """The TikTok row: one named application, followed on its own.
+
+    Package names rather than a display name, because Android reports the
+    package and TikTok ships under two of them depending on where the phone was
+    set up. Everything this row draws also appears in the Phone Use lane above
+    it — this is the same time seen twice, at two grains, not a second measurement.
+    """
+
+    rule_version: str = "1.0.0"
+
+    packages: list[str] = Field(
+        default_factory=lambda: ["com.zhiliaoapp.musically", "com.ss.android.ugc.trill"]
+    )
+
+    min_minutes: float = 0.5
+    """Shorter than the application tier's minimum: a two-minute look at this
+    one app is the whole point of the row, where a two-minute look at any app
+    is noise."""
+
+    merge_within_minutes: float = 2.0
+
+
+class ComputerUseRule(StrictModel):
+    """Turns per-second focus events into readable sessions.
+
+    ActivityWatch writes an event every time the focused window changes, so a
+    working hour is hundreds of events. Drawing them raw would be a smear; these
+    thresholds decide what counts as one stretch at the machine and what counts
+    as one spell in an application.
+    """
+
+    rule_version: str = "1.0.0"
+
+    min_session_minutes: float = 5.0
+    """Shortest stretch at the computer that counts as a session.
+
+    Shorter stretches are still drawn and still carry their real duration —
+    they are marked `brief` and left out of the session count. Discarding them
+    would silently remove time the day has focus events for, which fragmented
+    idle data produces constantly."""
+
+    merge_within_minutes: float = 5.0
+    """Idle stretches shorter than this do not end a session. Reading a page
+    without touching the mouse registers as away; treating that as leaving the
+    desk would cut every session into fragments."""
+
+    min_app_minutes: float = 3.0
+    """Shortest run in one application worth naming. Everything below is still
+    counted in the session total, and the count of what was dropped is
+    reported, so short spells are never silently missing."""
+
+    min_site_minutes: float = 5.0
+    """The same, for a browsing domain."""
 
 
 class FeatureEngineeringConfig(StrictModel):
@@ -356,6 +483,9 @@ class FeatureEngineeringConfig(StrictModel):
     step_activity: StepActivityRule = Field(default_factory=StepActivityRule)
     phone_location: PhoneLocationRule = Field(default_factory=PhoneLocationRule)
     device_use: DeviceUseRule = Field(default_factory=DeviceUseRule)
+    phone_app: PhoneAppRule = Field(default_factory=PhoneAppRule)
+    tiktok: TrackedAppRule = Field(default_factory=TrackedAppRule)
+    computer_use: ComputerUseRule = Field(default_factory=ComputerUseRule)
     data_gap: DataGapRule = Field(default_factory=DataGapRule)
 
 
@@ -370,6 +500,7 @@ class AppConfig(StrictModel):
     timezone: str | None = None
     mcp: McpConfig = Field(default_factory=McpConfig)
     home_assistant: HomeAssistantConfig = Field(default_factory=HomeAssistantConfig)
+    activitywatch: ActivityWatchConfig = Field(default_factory=ActivityWatchConfig)
     wearable: WearableConfig = Field(default_factory=WearableConfig)
     feature_engineering: FeatureEngineeringConfig = Field(
         default_factory=FeatureEngineeringConfig

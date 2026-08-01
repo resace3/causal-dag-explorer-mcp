@@ -3,11 +3,11 @@
 An MCP server that reconstructs a local calendar day from Home Assistant and
 wearable data, and serves it as an hour-by-hour swimlane timeline on localhost.
 
-It opens on yesterday. A calendar in the sidebar picks any earlier day, which is
-fetched and processed on demand.
+It opens on today, so far. A calendar in the sidebar picks any earlier day,
+which is fetched and processed on demand.
 
-The page answers one question — *what actually happened yesterday, and how do I
-know?* — and every mark on it is clickable down to the raw sensor records
+The page answers one question — *what actually happened on this day, and how do
+I know?* — and every mark on it is clickable down to the raw sensor records
 behind it.
 
 ![The Yesterday page with mock data](docs/screenshot-mock.png)
@@ -56,6 +56,7 @@ day could not place are listed rather than dropped.
 - [Quick start (mock data)](#quick-start-mock-data)
 - [Architecture](#architecture)
 - [Connecting Home Assistant](#connecting-home-assistant)
+- [Connecting ActivityWatch](#connecting-activitywatch)
 - [Wearable providers](#wearable-providers)
 - [MCP client configuration](#mcp-client-configuration)
 - [MCP tools](#mcp-tools)
@@ -98,6 +99,25 @@ it, and a new one appears when a source starts reporting — so a lane that
 disappears today and returns tomorrow comes back where you left it, and a lane
 you have never arranged joins at the bottom rather than jumping to the top.
 
+**Which rows are hidden is remembered too**, along with which tab you were on
+and the collapsed view's own switches — all on the same terms as the order: they
+are arrangements of your own view rather than anything derived from the data.
+They also **follow you between tabs**. This page opens automatically at login
+and tends to be left open, so two tabs at once is the normal case — and an older
+tab holding a stale arrangement would otherwise write it back over what you just
+did in the newer one.
+
+**Hiding a row removes it from all three tabs.** It loses its switch in
+Collapsed rather than merely being switched off there, and it loses its row in
+the DAG. Removed means removed; offering to bring it back on another tab would
+be offering something already declined.
+
+The rows on Expanded are therefore the single answer to "which streams does this
+day have?", and the other two tabs read it rather than each deciding for
+themselves. One consequence: you cannot draw a DAG arrow to a variable whose
+lane you have hidden. Restore the row from *Visible data streams* to reach it
+again.
+
 ### The lanes
 
 | Lane | What it shows | Source |
@@ -109,7 +129,10 @@ you have never arranged joins at the bottom rather than jumping to the top.
 | Sleep | Main sleep and naps, with stages when the provider publishes them | Wearable, or bed-occupancy as a documented fallback |
 | Skin / Wrist Temperature | Wearable temperature, labelled with the actual measurement | Wearable |
 | Environment | Light-condition blocks derived from measured illuminance, plus a room-temperature sub-line | Home Assistant |
-| Presence & Motion | Home/away, arrivals and departures, motion, door openings, device-use sessions | Home Assistant |
+| Presence & Motion | Home/away, arrivals and departures, motion, door openings | Home Assistant |
+| Computer Use | Stretches at this machine, which application had focus, and which site a browser tab was on | ActivityWatch |
+| Phone Use | Screen-on stretches, and which app was in front during them | Home Assistant |
+| TikTok | Spells in one named app, followed on its own row | Home Assistant |
 | Phone Location | The zone a device tracker reported, and the town it geocoded to | Home Assistant |
 
 ### Data sources are MCP servers
@@ -122,6 +145,7 @@ the route is never implied:
 | --- | --- | --- |
 | Home Assistant | `ha-mcp` | Its REST API (faster than proxying history through the MCP server) |
 | Garmin | `garmin` | The MCP server itself, read-only `get_*` tools only |
+| ActivityWatch | `activitywatch` | The same local REST API that MCP server wraps — see [Connecting ActivityWatch](#connecting-activitywatch) |
 
 Leave `command` unset under `mcp.servers` and the timeline reuses the server
 definition already in your MCP client's configuration, so credentials live in
@@ -194,15 +218,52 @@ The assistant can add rows too, with real language understanding, through the
 
 ## Collapsed mode
 
-The **Collapsed** tab reduces the day to its major events on one line. Two
+The **Collapsed** tab reduces the day to its major events on one line. Three
 controls shape it:
 
 - **Phenotype toggles** switch individual streams in and out, because a busy day
-  puts more on one line than one line can hold.
+  puts more on one line than one line can hold. **Every lane visible on the
+  Expanded tab has a switch here**, not only the ones whose events are in the
+  curated major-event list — and a lane hidden there has none at all.
+- **Major events only / Every event** drops that curation, so anything the
+  Expanded tab draws can be brought onto this line. Off by default: a view whose
+  whole point is being readable at a glance stops being readable with two
+  hundred marks on it.
 - **The window spans a month either side** of the selected day, scrolling
   horizontally. The view opens centred on that day, with history to its left and
   what followed to its right. The forward end stops at today, since a day that
   has not happened holds no data and cannot be reconstructed.
+
+Two rules decide what a switched-on lane contributes, because "major" is a
+curated list of event categories and not every lane has one:
+
+- A lane that **defines major events** contributes those.
+- A lane that **defines none** — Computer Use, Phone Use, Environment, HRV —
+  contributes everything it recorded. Otherwise switching it on would do
+  nothing and look broken.
+
+TikTok is on the curated list; the phone's screen-on stretches and ordinary app
+spells are deliberately not. A phone produces dozens of both in a day, which on
+one line is a smear rather than a landmark, while a followed app is a handful of
+spells and the reason that row exists at all.
+
+Lanes with major events start on; the rest start off, so connecting a new source
+does not silently triple the number of marks. Both states are remembered
+explicitly, so a lane you switched off stays off even if its default later
+changes.
+
+**A lane that is only a continuous line is not offered here.** A heart-rate
+trace with no discrete readings has nothing this view can draw: one row of marks
+cannot carry a curve, and picking a moment out of one to stand for the whole
+would be inventing salience — the same reason the DAG tab gives no node to a
+continuously sampled signal. It is left out rather than offered as a switch that
+does nothing.
+
+Every mark is clickable, including its caption and the leader line joining the
+two: the caption is the most obvious thing to aim at, and a mark is a bar eight
+pixels tall with its name floating some way above it. **A mark can belong to any
+day in the window**, so the details panel names the day when it is not the one
+on screen, rather than showing another day's times under this day's heading.
 
 A period that crosses midnight — a night's sleep, usually — is stored once per
 day it touches, each copy cut at the boundary. The two halves are drawn running
@@ -228,8 +289,19 @@ deliberate choice.
 
 ## Choosing a day
 
-The page opens on yesterday — the default and the day the MCP tools describe.
-The sidebar calendar selects any other day up to and including today.
+The page opens on **today**, and the sidebar's single navigation item goes back
+to it from wherever the calendar takes you. Today is incomplete by definition —
+the header says *In progress* and reads "Your data from today so far", so a
+part-day is never presented as a finished one. Just after midnight it is
+genuinely almost empty, which is the honest answer rather than a bug.
+
+A day still running is served from cache and never re-fetched by the one-minute
+poll, so an open page does not spawn an MCP subprocess every minute. **Refresh**
+is how you ask for the hours since the last sync.
+
+The MCP tools still describe yesterday by default (`get_yesterday_timeline`),
+since a finished day is the one worth handing to an agent. The sidebar calendar
+selects any other day up to and including today.
 
 | Marker | Meaning |
 | --- | --- |
@@ -301,13 +373,47 @@ to one origin.
 
 ## The DAG tab
 
-Next to **Expanded** and **Collapsed** is **DAG**. Pick an outcome — and
-optionally an exposure — and it draws the causal structure you would have to
-assume before analysing that question, **laid out on the day's own clock**.
+Next to **Expanded** and **Collapsed** is **DAG**: your causal model, **laid out
+on the day's own clock**. There is nothing to configure first — it opens on the
+whole model, and arrows are drawn by dragging from the dot on one row to
+another.
 
-It is one swimlane per variable, on the same x-axis the timeline tab uses, so
-the two views line up exactly. A node appears only at an hour the day actually
-recorded that event or state.
+**The rows are the Expanded tab's rows** — the same rows, with the same names,
+icons and descriptions, in the same order, on the same x-axis. Four rows there
+is four rows here. Rearranging the timeline rearranges this; hiding a row there
+removes it from here. A node appears only at an hour the day actually recorded
+that event or state.
+
+A lane can hold more than one quantity — Sleep carries duration, efficiency and
+onset — so a row stacks a tier per variable inside itself, named down the right
+of the row label, exactly as Presence & Motion stacks home/away, arrivals,
+motion and device use inside one row on the timeline. The row is the lane; the
+glyph in a node says which quantity.
+
+Three kinds of row therefore never appear, and all three used to:
+
+| Not drawn | Why |
+| --- | --- |
+| A lane you hid | Hidden is hidden, on every tab |
+| A lane with no data today | HRV on a night the watch was not worn is not a row on the timeline, so it is not a row here |
+| Variables no lane observes — stress, alcohol, work schedule | Nothing on the timeline carries them |
+
+The last one costs something real: **those arrows can no longer be drawn by
+dragging**, because there is no tier to drag to. They remain in the model,
+remain in the ledger below the graph, and become rows here the moment a
+connected source starts reporting them.
+
+Computer Use earned its row by gaining a variable: the causal model now has
+*Computer use*, grounded on the stretches at the machine, carrying the same two
+arrows the phone already had — to evening light and to sleep onset. Asserting
+that a lit phone delays sleep while a lit monitor does not would be an asymmetry
+the evidence does not support. Both are marked *plausible*, and either can be
+removed from the ledger.
+
+That ordering has a cost worth stating: the graph used to be laid out
+cause-first, so every arrow pointed down the page. Ordered by lane, some point
+back up. The arrowhead was always the honest signal for direction, and now it is
+the only one.
 
 ![The DAG tab showing a time-anchored causal graph](docs/screenshot-dag.png)
 
@@ -328,19 +434,38 @@ draw anything for a variable the day never recorded.
 
 | Encoding | Meaning |
 | --- | --- |
-| Glyph inside the node | Which variable it is — sleep duration, onset and efficiency share a lane but not an icon |
-| Node colour | Its role in the question you asked |
-| Outlined instead of filled | Background context, so the nodes with a role stay the ones that catch the eye |
+| Glyph inside the node | Which variable it is — sleep duration, onset and efficiency share a row but not an icon |
+| Node colour | The timeline lane it belongs to, matching the Expanded tab |
+| Tier name beside the row label | Which quantity that tier of the row holds |
+| Dashed circle, "no data this day" | A variable of a drawn row that this day did not record |
 | Solid navy arrow | Immediate — the effect follows within two hours |
 | Dashed green arrow | Delayed — the effect appears hours later |
 | Fainter line | Weaker published evidence for that link |
-| Halo behind an arrow | It lies on the exposure → outcome path |
+| Violet ring | An arrow you drew, rather than a published prior |
 | Full-width band | A state that held all day, so no single hour owns it |
 
-Roles are still assigned, and still only exist relative to an exposure. The
-row label carries each one; the adjustment set, mediator warnings and collider
-warnings come back from `get_expected_dag` rather than being printed under the
-graph:
+### Drawing and removing arrows
+
+Drag the dot on the trailing edge of any node onto another tier. Tiers are the
+drop target rather than nodes, and a variable of a drawn row that this day
+recorded nothing for still gets a dashed stand-in to grab. Hovering an arrow
+reveals a delete control at its midpoint. A drag that would close a loop is
+refused with the reason, since a cyclic "DAG" is not one.
+
+Edits are stored server-side, so `get_expected_dag` reflects them too.
+
+### Asking a specific question
+
+The tab shows the model; it does not ask anything of it. Confounder, mediator
+and collider are not properties of a variable — they are properties of a
+variable *relative to a named exposure and outcome* — so with no question asked
+there are no roles to assign, and claiming otherwise would be describing a
+comparison nobody set up.
+
+Naming a pair is still supported, through `POST /api/dag` with an `outcome` (and
+optionally an `exposure`), and through the `get_expected_dag` MCP tool. That is
+where the adjustment set, the mediator warnings and the collider warnings come
+from:
 
 | Role | Meaning | What to do with it |
 | --- | --- | --- |
@@ -355,9 +480,10 @@ the graph is the graph — but every one is in the `/api/dag` response and the
 `get_expected_dag` MCP tool, under `rows` and `unplacedEdges`:
 
 - **Unmeasured variables** — stress, alcohol, caffeine, illness, work schedule.
-  They have no place on a clock at all. They remain part of the assumed
-  structure, and the response names which ones you cannot adjust away with the
-  sources you have connected.
+  They have no place on a clock at all, and no lane on the timeline, so the tab
+  gives them no row. They remain part of the assumed structure, and the
+  response names which ones you cannot adjust away with the sources you have
+  connected.
 - **Whole-day states** — the town you were in, an all-day away period. True at
   every hour, so there is no single hour for an arrow to attach to. They get a
   band instead.
@@ -366,10 +492,10 @@ the graph is the graph — but every one is in the `/api/dag` response and the
   salience. A derived value like resting heart rate *is* a moment, and does get
   a node.
 
-Give it an outcome alone and it shows what is believed to cause that outcome.
 Edit `knowledge.py` to change the hypotheses; `causal/grounding.py` decides how
 each variable is recognised on a real day. Both are meant to be edited — a
-personal causal model should be personal.
+personal causal model should be personal, which is also why the arrows can be
+drawn by hand.
 
 > Like the calendar, this reverses the original spec's "no causal claims"
 > constraint, added later at the owner's request. It is scoped so it stays
@@ -504,6 +630,7 @@ home_assistant:
     humidity: [sensor.living_room_humidity]
     door: [binary_sensor.front_door]
     device_use: [binary_sensor.phone_interactive]
+    app_usage: [sensor.phone_last_used_app]
     steps: [sensor.you_steps]
     resting_heart_rate: [sensor.you_resting_heart_rate]
     sleep: [binary_sensor.bed_occupied]
@@ -534,6 +661,148 @@ unavailable states, duplicate records, sensor gaps, timezone conversion, DST,
 histories crossing midnight, authentication failure, an offline instance, rate
 limits and partial availability are all handled, and each produces a specific
 message rather than a generic error.
+
+### Phone use, and the TikTok row
+
+Two rows come from the Home Assistant companion app on an Android phone.
+
+**Phone Use** has two tiers, the same shape Computer Use has:
+
+* **Screen-on stretches**, from `entities.device_use` — the companion app's
+  *Interactive* sensor. Locks shorter than
+  `feature_engineering.device_use.merge_within_minutes` do not end a session,
+  so putting the phone down for a moment is not a new pickup.
+* **Which app was in front**, from `entities.app_usage` — the companion app's
+  *Last used app* sensor, which reports an Android package name.
+
+**TikTok** follows one app on its own row, so a quarter of an hour that
+disappears inside "phone use" can be lined up against sleep onset and evening
+light. Everything it draws also appears as an application spell one row up:
+that is one stretch of time at two grains, not two measurements, and the
+details panel says so.
+
+#### Why the screen sensor is required, not optional
+
+`sensor.<phone>_last_used_app` reports a change and then **holds that value
+indefinitely**, screen on or off. The app open when the phone is put down at
+eleven is still the reported app at eight the next morning. Drawn unclipped,
+one glance at TikTok before bed becomes a nine-hour block.
+
+So every run is intersected with the screen-on windows before anything is
+drawn, and the unbridged windows are used for that — bridging a five-minute
+pocket gap into a session is fine for a session bar, but it would silently
+become five minutes in an app. With `device_use` configured and `app_usage`
+missing, the top tier still draws. The other way round, the application tier is
+**withheld** and both the lane and a warning say why, because there is no
+honest version of that row.
+
+Two smaller decisions follow the same rule:
+
+* Runs are built from every package and filtered to the tracked ones
+  *afterwards*. Filtering first would let two TikTok spells either side of a
+  glance at the home screen merge across it, relabelling that glance — on the
+  one row whose entire job is to say how long was spent in the app.
+* Package names get readable labels (`com.zhiliaoapp.musically` → TikTok) from
+  a lookup in `rules/phone_use.py`, and anything unlisted falls back to its
+  last segment. The raw package is kept in the event metadata and provenance,
+  so the label can never hide what was recorded.
+
+#### Following a different app
+
+TikTok ships under two package names depending on where the phone was set up,
+which is why the config takes a list:
+
+```yaml
+feature_engineering:
+  tiktok:
+    packages:
+      - com.zhiliaoapp.musically
+      - com.ss.android.ugc.trill
+```
+
+Point those at another package to follow a different app. The row's *name*
+lives in `server/app/feature_engineering/rules/tiktok.py` alongside the causal
+variable of the same id — change both together, or the row will draw Instagram
+under a TikTok heading.
+
+No application is labelled social, productive or a distraction anywhere in
+this app. The row says how long, and when.
+
+---
+
+## Connecting ActivityWatch
+
+[ActivityWatch](https://activitywatch.net) records which application had focus
+and whether the keyboard and mouse were idle. If it is running, there is nothing
+to configure — it listens on `http://localhost:5600` and the timeline finds it.
+
+```yaml
+activitywatch:
+  enabled: true
+  mcp_server: activitywatch
+  detail: domain
+```
+
+### Why this one is read over REST, not over its MCP server
+
+The other MCP-backed source, Garmin, is read through its MCP server because that
+server returns JSON. The `activitywatch` MCP server returns *formatted text* —
+ranked tables meant for a reader — so consuming it would mean parsing its
+column layout back into numbers, and every change to its output would break the
+timeline. It is a thin wrapper over ActivityWatch's own local REST API, which is
+what this app reads instead. Same server, same data, one less thing to break.
+The row still names the MCP integration, so the panel matches what you
+configured in your MCP client.
+
+Set `ACTIVITYWATCH_URL` if it does not listen on the default port. There is no
+credential: the server is unauthenticated and reachable only from this machine,
+which is also why the timeline never addresses it off-machine.
+
+### How much detail is kept
+
+`detail` decides what is read at all. It is the same treatment
+`include_street_address` gets for phone location — reduced but useful by
+default, with the revealing level a deliberate choice:
+
+| Level | What each event carries |
+| --- | --- |
+| `app` | The application name only. The browser extension is not read at all. |
+| `domain` *(default)* | Plus the site a tab was on, reduced to its domain — `github.com`, never `github.com/you/private-repo` |
+| `full` | Plus window titles and complete URLs |
+
+**Reduction happens in the connector, before a record exists.** A title the
+level does not permit is not stored, not cached in SQLite, not returned by the
+API and not sent to the browser — the same rule that keeps GPS coordinates out
+of the Phone Location lane. Choosing `full` is choosing to store window titles,
+which quote document names, message subjects and search queries. Each event
+records the level that produced it.
+
+### What the lane shows
+
+Three tiers on one row, coarsest first:
+
+- **At the computer** — merged stretches of keyboard and mouse activity. An idle
+  spell shorter than `merge_within_minutes` does not end a stretch, because
+  pausing to read a page is not leaving the desk.
+- **Applications** — which program had focus, for runs past `min_app_minutes`.
+- **Browsing** — which site a tab was on, when the level permits it and the
+  browser extension is reporting.
+
+Two deliberate omissions. Applications are never categorised as work, leisure or
+distraction: that judgement is not in the data, and nothing else in this
+application passes judgement either. And **a computer that is off is not missing
+data** — the lane produces no continuous series, so a day spent away from the
+desk lowers no coverage figure and draws no hatched gap.
+
+Stretches below `min_session_minutes` are still drawn, marked `brief`, and left
+out of the session count. Discarding them was the first version of this rule and
+it was wrong: real idle data fragments into four-minute stretches split by
+six-minute breaks, so a whole evening of recorded activity disappeared from a
+lane that had the events for it.
+
+Without `aw-watcher-afk` the lane still works, from focus events alone — but a
+window left open then counts as use, so those sessions are marked medium quality
+and the reconstruction warns that they were inferred.
 
 ---
 
@@ -692,14 +961,12 @@ configuration. If you prefer to pass them explicitly, add an `env` block.
 | `get_yesterday_timeline` | Return the normalized timeline. Supports lane filtering, downsampling, and toggling metadata/provenance. |
 | `get_day_timeline` | Return the timeline for one specific day (`YYYY-MM-DD`). |
 | `list_days` | List the days the calendar can offer, and which already hold data. |
-| `get_expected_dag` | Build the expected causal graph for an outcome (and optional exposure). A hypothesis, never an estimate. |
+| `get_expected_dag` | Build the causal graph. No arguments gives the whole model, as the DAG tab shows it; an outcome (and optional exposure) narrows it and adds roles. A hypothesis, never an estimate. |
 | `list_causal_variables` | List variables usable as an exposure or outcome, and whether each was observed. |
 | `add_timeline_row` | Add a row to the expanded timeline, described in words. |
 | `list_timeline_rows` | List the custom rows, with the request behind each. |
 | `remove_timeline_row` | Remove a custom row. |
 
-Edge edits made in the UI are stored server-side, so `get_expected_dag` reflects
-them too.
 | `get_data_sources` | Status and capabilities of every configured source. |
 | `get_event_details` | Complete metadata and provenance for one event id. |
 | `refresh_timeline` | Re-run synchronization and feature engineering. |
@@ -746,6 +1013,8 @@ empty day.
 | `HOME_ASSISTANT_TOKEN` | — | Long-lived access token |
 | `HOME_ASSISTANT_TIMEOUT_SECONDS` | `15` | Request timeout |
 | `HOME_ASSISTANT_VERIFY_SSL` | `true` | Only disable for a self-signed cert on your own network |
+| `ACTIVITYWATCH_URL` | `http://localhost:5600` | Where the ActivityWatch server listens |
+| `ACTIVITYWATCH_TIMEOUT_SECONDS` | `20` | Request timeout |
 | `API_HOST` / `API_PORT` | `127.0.0.1` / `8000` | Backend bind address |
 | `FRONTEND_PORT` | `3000` | Vite dev server port |
 | `DATA_DIR` | `./data` | Where the SQLite file lives |
@@ -918,12 +1187,18 @@ already installs, so there is no new image dependency.
 | **Readiness** | `server/app/feature_engineering/rules/readiness.py` |
 | **Temperature deviation** | `server/app/feature_engineering/rules/temperature.py` |
 | **Light categories / environment** | `server/app/feature_engineering/rules/light.py` |
-| **Presence, motion, doors, device use** | `server/app/feature_engineering/rules/presence.py` |
+| **Presence, motion, doors** | `server/app/feature_engineering/rules/presence.py` |
+| **Computer use sessions and applications** | `server/app/feature_engineering/rules/computer_use.py` |
+| **Phone screen sessions and app spells** | `server/app/feature_engineering/rules/phone_use.py` |
+| What a package name is called on screen | `server/app/feature_engineering/rules/phone_use.py::APP_NAMES` |
+| **Which app the TikTok row follows** | `config.yaml` → `feature_engineering.tiktok.packages` (and the row's name in `rules/tiktok.py`) |
+| How much of a window or tab is kept | `config.yaml` → `activitywatch.detail` |
 | Lane order and failure handling | `server/app/feature_engineering/pipeline.py` |
 | Config schema for a new rule | `server/app/config/schema.py` |
 | **Add a wearable provider** | `server/app/connectors/wearables/registry.py` + a new module beside it |
 | Home Assistant entity groups | `server/app/config/schema.py::HomeAssistantEntities` and `connectors/home_assistant/connector.py::STREAM_BY_DOMAIN` |
 | The calendar and its markers | `frontend/src/components/Calendar.tsx` |
+| Which events count as "major" in collapsed mode | `frontend/src/utilities/lanes.ts::MAJOR_CATEGORIES` |
 | Which days are offered | `server/app/services/sync.py::available_days` |
 | Lane colours, heights, major events | `frontend/src/utilities/lanes.ts` |
 | The x-axis scale | `frontend/src/timeline/scale.ts` |
@@ -942,6 +1217,18 @@ already installs, so there is no new image dependency.
   in device-tracker attributes; the connector keeps only the state string, so
   they never enter the data model at all. A test walks the serialised lane and
   fails if any field carries one.
+- **Computer use is reduced before it is stored.** `activitywatch.detail`
+  decides what the connector keeps, and anything above that level is dropped
+  where the events arrive rather than hidden at render time — so it never
+  reaches SQLite, the API or the browser. The default keeps application names
+  and browsing domains; window titles and full URLs require `detail: full`.
+- **Phone app names are package names, and nothing finer.** The Phone Use and
+  TikTok rows read one sensor whose state is a package (`com.whatsapp`). No
+  notification text, message content, in-app screen or URL is available to this
+  app or stored by it, and the sensor is only read in combination with the
+  screen-state sensor — an app spell is never drawn for a phone that was
+  asleep. The friendly label is presentation only; the package it came from
+  stays in the event.
 - **Location is shown at town level by default.** The lane draws the tracker's
   zone (`Home`, `Away`, or a named zone) and the town from a geocoded sensor.
   The full street address is off unless you deliberately set
@@ -1022,6 +1309,16 @@ The source genuinely stopped reporting for longer than
 `feature_engineering.data_gap.stale_after_minutes`. Raise that value for sensors
 that legitimately report rarely.
 
+**The Computer Use lane says ActivityWatch recorded nothing.**
+It only holds days since it was installed, and it records nothing while the
+machine is off. Check the ActivityWatch dashboard at `http://localhost:5600` for
+the day in question; if the app is not running, the MCPs panel says so instead.
+
+**Computer use shows applications but no browsing.**
+The ActivityWatch browser extension is not installed or not reporting, or
+`activitywatch.detail` is set to `app`. Browser time still appears under the
+browser's own application name.
+
 **A whole day shows as "Away".**
 Home Assistant's `person` entity was `not_home` for the day. Set
 `feature_engineering.home_presence.entity_priority` to prefer a tracker that
@@ -1049,8 +1346,13 @@ Set `API_PORT` / `FRONTEND_PORT` in `.env`.
   sources and read the whole day — tens of seconds when Garmin is involved.
   Processed days are stored, so returning to one is instant.
 - **How far back you can go depends on the sources**, not on this app: Home
-  Assistant's `recorder` retention (10 days by default) and whatever history
-  your wearable account holds.
+  Assistant's `recorder` retention (10 days by default), whatever history your
+  wearable account holds, and — for computer use — the day ActivityWatch was
+  installed, since it keeps everything from then and nothing from before.
+- **Computer use is one machine's.** ActivityWatch records the computer it runs
+  on. A second machine needs its own watcher, and if one server collects both,
+  `activitywatch.hostname` picks which one the day describes rather than the two
+  being merged.
 - **Sleep stages depend on the provider.** The `home_assistant` provider gets
   daily summaries, so it reports an interval with no stages rather than
   inventing a hypnogram.
