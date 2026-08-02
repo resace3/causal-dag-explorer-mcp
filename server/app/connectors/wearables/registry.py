@@ -26,6 +26,7 @@ from ..home_assistant.client import HomeAssistantClient
 from .base import WearableProvider
 from .composite import CompositeWearableProvider
 from .garmin_mcp import GarminMcpProvider
+from .google_health_mcp import GoogleHealthMcpProvider
 from .home_assistant_provider import HomeAssistantWearableProvider
 from .json_file import JsonFileWearableProvider
 from .mock import MockWearableProvider
@@ -68,10 +69,26 @@ def _build_garmin_mcp(
     return GarminMcpProvider(garmin, config.mcp.server(garmin.mcp_server), tz)
 
 
+def _build_google_health_mcp(
+    config: AppConfig, settings: Settings, tz: ZoneInfo
+) -> WearableProvider:
+    google = config.wearable.google_health_mcp
+    return GoogleHealthMcpProvider(google, config.mcp.server(google.mcp_server), tz)
+
+
 def _build_auto(config: AppConfig, settings: Settings, tz: ZoneInfo) -> WearableProvider:
-    """Try each configured route in order, per metric."""
+    """Try each configured route in order, per metric.
+
+    Routes named only under `metric_routes` are built too: pinning sleep to one
+    source is a way of naming a route, and requiring it to be repeated in the
+    general list as well would make a pin that silently did nothing.
+    """
+    names: list[str] = list(config.wearable.routes)
+    for pinned in config.wearable.metric_routes.values():
+        names.extend(name for name in pinned if name not in names)
+
     routes: list[tuple[str, WearableProvider]] = []
-    for name in config.wearable.routes:
+    for name in names:
         factory = _FACTORIES.get(name)
         if factory is None or name == "auto":
             continue
@@ -82,9 +99,9 @@ def _build_auto(config: AppConfig, settings: Settings, tz: ZoneInfo) -> Wearable
     if not routes:
         raise ValueError(
             "wearable.provider is 'auto' but none of wearable.routes could be built. "
-            f"Configured routes: {config.wearable.routes}."
+            f"Configured routes: {names}."
         )
-    return CompositeWearableProvider(routes)
+    return CompositeWearableProvider(routes, config.wearable.metric_routes)
 
 
 _FACTORIES: dict[str, ProviderFactory] = {
@@ -92,6 +109,7 @@ _FACTORIES: dict[str, ProviderFactory] = {
     "json_file": _build_json_file,
     "home_assistant": _build_home_assistant,
     "garmin_mcp": _build_garmin_mcp,
+    "google_health_mcp": _build_google_health_mcp,
     "auto": _build_auto,
 }
 

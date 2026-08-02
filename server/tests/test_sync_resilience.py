@@ -161,7 +161,7 @@ async def test_a_failing_metric_degrades_only_that_metric(
     assert sleep.available
     event = sleep.events[0]
     assert event.measured_or_derived == "derived"
-    assert event.label == "Time in bed"
+    assert event.label.startswith("Time in bed · ")
     assert event.provenance.transformation_rule.endswith("from_bed_occupancy")
     assert "no wearable sleep record" in event.provenance.notes[0].lower()
 

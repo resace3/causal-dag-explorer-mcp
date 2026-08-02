@@ -74,6 +74,7 @@ def test_registry_lists_the_implemented_providers():
     assert available_providers() == [
         "auto",
         "garmin_mcp",
+        "google_health_mcp",
         "home_assistant",
         "json_file",
         "mock",
@@ -93,7 +94,7 @@ def test_unknown_provider_name_is_reported(example_config, new_york):
     with pytest.raises(ValueError) as error:
         build_provider(example_config, settings, new_york)
     assert "Unknown wearable provider 'oura'" in str(error.value)
-    assert "auto, garmin_mcp, home_assistant, json_file, mock" in str(error.value)
+    assert "auto, garmin_mcp, google_health_mcp, home_assistant, json_file, mock" in str(error.value)
 
 
 def test_mock_provider_satisfies_the_protocol(new_york):

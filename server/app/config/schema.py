@@ -25,6 +25,9 @@ ENTITY_GROUPS = (
     "door",
     "device_use",
     "app_usage",
+    "tv_use",
+    "tv_app",
+    "tv_title",
     "steps",
     "resting_heart_rate",
     "heart_rate",
@@ -221,16 +224,35 @@ class GarminMcpConfig(StrictModel):
     generic readiness score; when neither exists the lane stays hidden."""
 
 
+RouteName = Literal["garmin_mcp", "google_health_mcp", "home_assistant", "json_file", "mock"]
+
+
+class GoogleHealthMcpConfig(StrictModel):
+    """Sleep read from the Google Health MCP server.
+
+    Sleep only, deliberately. The same API carries steps, heart rate and more,
+    all of which already have a source on this machine; a provider that claimed
+    them would start winning metrics nobody pointed it at.
+    """
+
+    device_name: str = "Google Health"
+    mcp_server: str = "google-health"
+    """Key under `mcp.servers`, and the name looked up in the MCP client config."""
+
+
 class WearableConfig(StrictModel):
-    provider: Literal["mock", "json_file", "home_assistant", "garmin_mcp", "auto"] = "mock"
+    provider: Literal[
+        "mock", "json_file", "home_assistant", "garmin_mcp", "google_health_mcp", "auto"
+    ] = "mock"
     device_name: str = "Mock Wearable"
     json_file: JsonFileProviderConfig = Field(default_factory=JsonFileProviderConfig)
     home_assistant: HomeAssistantWearableConfig = Field(
         default_factory=HomeAssistantWearableConfig
     )
     garmin_mcp: GarminMcpConfig = Field(default_factory=GarminMcpConfig)
+    google_health_mcp: GoogleHealthMcpConfig = Field(default_factory=GoogleHealthMcpConfig)
 
-    routes: list[Literal["garmin_mcp", "home_assistant", "json_file", "mock"]] = Field(
+    routes: list[RouteName] = Field(
         default_factory=lambda: ["garmin_mcp", "home_assistant"]
     )
     """Used when provider is `auto`: routes are tried in this order, per metric.
@@ -238,6 +260,29 @@ class WearableConfig(StrictModel):
     The first route with data for a metric supplies it. Metrics are never
     blended between routes.
     """
+
+    metric_routes: dict[str, list[RouteName]] = Field(default_factory=dict)
+    """Per-metric override of `routes`, for a metric that belongs to one source.
+
+    A metric listed here uses exactly the routes named, in that order, and
+    nothing else — so `sleep: [google_health_mcp]` means sleep comes from there
+    or is reported missing, rather than quietly falling through to whichever
+    other device also happens to guess at it. A week of nights that silently
+    alternated between two wearables would look like one record of sleep and be
+    two, which is the sort of thing this application exists not to do.
+
+    Routes named here are built even when they are absent from `routes`.
+    """
+
+    @model_validator(mode="after")
+    def _check_metric_routes(self) -> "WearableConfig":
+        for metric, routes in self.metric_routes.items():
+            if not routes:
+                raise ValueError(
+                    f"wearable.metric_routes.{metric} is empty. Remove the key to use "
+                    "wearable.routes, or name at least one route."
+                )
+        return self
 
 
 class LightBand(StrictModel):

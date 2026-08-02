@@ -8,6 +8,7 @@ cause.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
@@ -15,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.api import routes
 from app.causal.dag import build_dag
+from app.causal import grounding, knowledge
 from app.causal.grounding import IMMEDIATE_MAX_MINUTES, ground
 from app.main import create_app
 from app.models.timeline import DayTimeline, Lane, SeriesPoint, TimelineEvent, TimelineSeries
@@ -347,7 +349,27 @@ def test_a_caption_does_not_repeat_the_duration_as_a_value(workout_and_sleep):
     assert sleep.detail == "5 h"
 
 
-def test_a_ratio_stored_as_a_fraction_is_captioned_as_a_percentage():
+def test_a_ratio_stored_as_a_fraction_is_captioned_as_a_percentage(monkeypatch):
+    """A metric-backed grounding reads 0.912 as 91.2%, not as 0.9.
+
+    No variable is grounded on a metadata metric at the moment — sleep
+    efficiency was the last one, and it left with the stage data when the sleep
+    row became a duration row. The machinery is still how any future ratio
+    would be captioned, so the grounding is installed here rather than the test
+    deleted along with the only thing that happened to use it.
+    """
+    monkeypatch.setitem(
+        grounding.GROUNDINGS,
+        "sleep_efficiency",
+        (grounding.Grounding(lane="sleep", categories=("main_sleep",), metric="efficiency"),),
+    )
+    # Unmeasured variables are never placed, so it has to be measured again
+    # for the duration of the test as well as grounded.
+    monkeypatch.setitem(
+        knowledge.VARIABLES,
+        "sleep_efficiency",
+        replace(knowledge.VARIABLES["sleep_efficiency"], measured=True, lane="sleep"),
+    )
     timeline = _timeline(
         _lane(
             "sleep",

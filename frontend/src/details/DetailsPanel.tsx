@@ -100,8 +100,6 @@ const HIDDEN_METADATA = new Set([
   'fullStart',
   'fullEnd',
   'durationMinutes',
-  'stages',
-  'stageMinutes',
   'note',
   'coversSleepStart',
   'coversSleepEnd',

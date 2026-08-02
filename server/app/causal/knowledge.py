@@ -84,17 +84,25 @@ VARIABLES: dict[str, Variable] = {
             lane="sleep",
             unit="min",
         ),
+        # Both were observed through the sleep lane until that row became a
+        # duration row. They stay in the model as unmeasured: the arrows into
+        # them are still the assumptions an analysis of sleep would rest on,
+        # and deleting them would quietly turn "we do not measure this" into
+        # "this does not matter". Restoring either means grounding it again in
+        # a row that actually reports it.
         Variable(
             "sleep_onset",
             "Sleep onset time",
-            "The clock time sleep began.",
-            lane="sleep",
+            "The clock time sleep began. Not measured: the sleep row reports how "
+            "long each period lasted, not when it started.",
+            measured=False,
         ),
         Variable(
             "sleep_efficiency",
             "Sleep efficiency",
-            "Proportion of time in bed spent asleep.",
-            lane="sleep",
+            "Proportion of time in bed spent asleep. Not measured: the sleep row "
+            "reports duration only.",
+            measured=False,
             unit="%",
         ),
         Variable(

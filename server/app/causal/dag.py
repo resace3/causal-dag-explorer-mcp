@@ -442,7 +442,9 @@ def _notes(dag: Dag, exposure: str | None, outcome: str, observed: set[str]) -> 
 #: Which lanes count as evidence that a variable was observed on a given day.
 OBSERVED_BY_LANE = {
     "activity": {"exercise", "step_count"},
-    "sleep": {"sleep_duration", "sleep_onset", "sleep_efficiency"},
+    # Duration only. Onset and efficiency were dropped with the stage data the
+    # row no longer carries, so nothing observes them and the graph says so.
+    "sleep": {"sleep_duration"},
     "heart_rate": {"resting_heart_rate"},
     "hrv": {"hrv"},
     "readiness": {"readiness"},

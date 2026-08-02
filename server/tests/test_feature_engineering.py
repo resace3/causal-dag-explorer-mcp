@@ -71,7 +71,7 @@ async def test_nap_is_labelled_separately_from_main_sleep(timeline):
     lane = _lane(timeline, "sleep")
     naps = [event for event in lane.events if event.category == "nap"]
     assert len(naps) == 1
-    assert naps[0].label == "Nap"
+    assert naps[0].label.startswith("Nap · ")
 
 
 async def test_heart_rate_series_breaks_across_the_charging_gap(timeline):

@@ -27,6 +27,9 @@ mcp:
     activitywatch:
       enabled: true
       discover_from_client: true
+    google-health:
+      enabled: true
+      discover_from_client: true
 
 home_assistant:
   enabled: true

@@ -79,17 +79,11 @@ GROUNDINGS: dict[str, tuple[Grounding, ...]] = {
     # Step periods carry the step total as their value.
     "step_count": (Grounding(lane="activity", categories=("walking_period",)),),
     "sleep_duration": (Grounding(lane="sleep", categories=("main_sleep", "nap")),),
-    "sleep_onset": (
-        Grounding(
-            lane="sleep",
-            categories=("main_sleep",),
-            true_start_only=True,
-            as_point=True,
-        ),
-    ),
-    "sleep_efficiency": (
-        Grounding(lane="sleep", categories=("main_sleep",), metric="efficiency"),
-    ),
+    # `sleep_onset` and `sleep_efficiency` are deliberately ungrounded. The
+    # Sleep Duration row reports how long, and a row named for one quantity
+    # standing in for three would let a claim about bedtime be read off a
+    # drawing that never measured it. Both remain in the knowledge base as
+    # unmeasured variables, so the arrows into them still say what they assume.
     "resting_heart_rate": (Grounding(lane="heart_rate", categories=("resting",)),),
     "hrv": (Grounding(lane="hrv"),),
     "readiness": (Grounding(lane="readiness"),),

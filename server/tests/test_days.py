@@ -185,7 +185,10 @@ def test_the_sleep_highlight_quotes_unclipped_times(client, sync_service):
         pytest.skip("no main sleep in this generated day")
 
     line = sleep_lines[0]
-    hours = float(line.split(", ")[-1].split(" hours")[0].rstrip(")").split()[-1])
+    # The sentence names two figures now — the period, then how much of it was
+    # asleep — so read the one attached to the word "hours", which is the only
+    # one the quoted clock times are supposed to span.
+    hours = float(line.split(" hours")[0].split(", ")[-1])
     start_text, rest = line.removeprefix("Recorded sleep ran from ").split(" to ", 1)
     end_text = rest.split(",")[0]
 

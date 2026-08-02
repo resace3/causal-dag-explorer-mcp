@@ -98,8 +98,8 @@ export function makeTimeline(overrides: Partial<DayTimeline> = {}): DayTimeline 
     makeLane({
       id: 'sleep',
       phenotype: 'sleep',
-      label: 'Sleep',
-      description: 'Sleep periods and stages',
+      label: 'Sleep Duration',
+      description: 'How long each sleep period lasted',
       accent: 'orange',
       events: [
         makeEvent({

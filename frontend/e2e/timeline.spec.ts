@@ -77,14 +77,27 @@ test.describe('Yesterday timeline', () => {
     const heading = page.getByRole('heading', { level: 1 });
     await expect(heading).toHaveText('Today');
 
-    // Step back a few days from whatever "today" is.
+    // Pick the latest earlier day the calendar is actually showing, rather
+    // than counting back a fixed number of days: the calendar renders one
+    // month, so on the 2nd of a month arithmetic lands on a date that is not
+    // on screen, and the failure looks like a broken calendar instead of a
+    // test that walked off the page.
     const today = await page.evaluate(async () => {
       const response = await fetch('/api/days');
       return (await response.json()).today as string;
     });
-    const target = new Date(`${today}T12:00:00Z`);
-    target.setUTCDate(target.getUTCDate() - 3);
-    const iso = target.toISOString().slice(0, 10);
+    const iso = await page
+      .locator('[data-testid^="calendar-day-"]:not([disabled])')
+      .evaluateAll(
+        (nodes, current: string) =>
+          nodes
+            .map((node) => (node as HTMLElement).dataset.testid!.replace('calendar-day-', ''))
+            .filter((date) => date < current)
+            .sort()
+            .pop() ?? '',
+        today,
+      );
+    expect(iso, 'the calendar must offer at least one earlier day').not.toBe('');
 
     await page.getByTestId(`calendar-day-${iso}`).click();
     await expect(heading).not.toHaveText('Today', { timeout: 60_000 });
@@ -303,23 +316,33 @@ test.describe('Yesterday timeline', () => {
       timeout: 30_000,
     });
 
-    // Both ends have to be rows the day is drawing, since the rows are now
-    // exactly the timeline's. These two share the Sleep lane, so they are on
-    // screen together whenever sleep was recorded, and the model has no arrow
-    // between them in either direction — one that already existed would be
-    // refused as a duplicate rather than drawn.
-    const source = 'sleep_efficiency';
-    const target = 'sleep_onset';
+    // Both ends have to be variables the day is drawing, since the rows are now
+    // exactly the timeline's — and the model must hold no arrow between them
+    // in either direction, or the drag would be refused as a duplicate rather
+    // than drawn. Naming a fixed pair meant this test quietly skipped itself
+    // the day one of them stopped being observed, so the pair is chosen from
+    // what is actually on screen.
     const edgesBefore = await page.evaluate(() => userEdgeKeys());
-    // Both are tiers inside the Sleep row rather than rows of their own, so
-    // their presence is checked by the handle each one carries.
-    const present = await page.evaluate(
-      ([a, b]) =>
-        Boolean(document.querySelector(`[data-testid="dag-handle-${a}"]`)) &&
-        Boolean(document.querySelector(`[data-testid="dag-handle-${b}"]`)),
-      [source, target],
-    );
-    test.skip(!present, 'This day drew no sleep tiers to connect.');
+    const pair = await page.evaluate(async () => {
+      const drawn = [...document.querySelectorAll('[data-testid^="dag-handle-"]')].map(
+        (node) => (node as HTMLElement).dataset.testid!.replace('dag-handle-', ''),
+      );
+      const body = await (await fetch('/api/dag/edges')).json();
+      const linked = new Set(
+        body.edges.flatMap((e: { source: string; target: string }) => [
+          `${e.source}|${e.target}`,
+          `${e.target}|${e.source}`,
+        ]),
+      );
+      for (const a of drawn) {
+        for (const b of drawn) {
+          if (a !== b && !linked.has(`${a}|${b}`)) return [a, b];
+        }
+      }
+      return null;
+    });
+    test.skip(!pair, 'This day drew fewer than two unconnected variables.');
+    const [source, target] = pair!;
 
     const handle = page.getByTestId(`dag-handle-${source}`).locator('visible=true').first();
     await handle.scrollIntoViewIfNeeded();
@@ -376,17 +399,17 @@ test.describe('Yesterday timeline', () => {
     await waitForTimeline(page);
     const edgesBefore = await page.evaluate(() => userEdgeKeys());
     await page.getByTestId('mode-dag').click();
-    await expect(page.getByTestId('dag-row-sleep')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('dag-row-activity')).toBeVisible({ timeout: 30_000 });
 
-    // sleep_onset -> sleep_duration is in the model, so the reverse closes a
-    // loop. Both share the Sleep lane, so both are on screen together.
+    // exercise -> step_count is in the model, so the reverse closes a loop.
+    // Both share the Activity lane, so both are on screen together.
     //
     // A variable can carry more than one handle, so the visible one is picked
     // rather than whichever comes first in the DOM: pressing on a handle that
     // is scrolled out of view starts no drag, and the failure then surfaces
     // much later as a missing drop row.
     const handle = page
-      .getByTestId('dag-handle-sleep_duration')
+      .getByTestId('dag-handle-step_count')
       .locator('visible=true')
       .first();
     await handle.scrollIntoViewIfNeeded();
@@ -398,7 +421,7 @@ test.describe('Yesterday timeline', () => {
 
     // Drop rows only exist mid-drag, so their presence is the proof that the
     // press above actually began one.
-    const dropRow = page.getByTestId('dag-drop-sleep_onset');
+    const dropRow = page.getByTestId('dag-drop-exercise');
     await expect(dropRow).toBeVisible({ timeout: 10_000 });
     const to = await dropRow.boundingBox();
     await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 8 });

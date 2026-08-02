@@ -24,13 +24,6 @@ import {
 const NODE_RADIUS = 15;
 const LABEL_OFFSET = 22;
 
-const STAGE_OPACITY: Record<string, number> = {
-  deep: 1,
-  rem: 0.72,
-  light: 0.5,
-  awake: 0.24,
-};
-
 interface Geometry {
   event: TimelineEvent;
   startX: number;
@@ -100,9 +93,6 @@ export function EventLane({
         const missing = event.category === 'missing_data';
         const hasDuration = Boolean(event.endTime) && endX - startX > 1.5;
         const label = labels[index];
-        const stages = Array.isArray(event.metadata?.stages)
-          ? (event.metadata.stages as { stage: string; start: string; end: string }[])
-          : [];
 
         return (
           <Mark
@@ -134,35 +124,19 @@ export function EventLane({
             })()}
 
             {hasDuration ? (
-              <>
-                <IntervalBar
-                  x={startX}
-                  width={endX - startX}
-                  y={baseline - 5}
-                  height={10}
-                  fill={missing ? `url(#${patternId})` : theme.fill}
-                  opacity={missing ? 1 : 0.85}
-                  continuesBefore={event.continuesBefore}
-                  continuesAfter={event.continuesAfter}
-                  stroke={missing ? '#c9d2de' : undefined}
-                />
-                {stages.map((stage, stageIndex) => {
-                  const x = scale.x(stage.start);
-                  const width = Math.max(scale.x(stage.end) - x, 0.8);
-                  return (
-                    <rect
-                      key={`${event.id}-stage-${stageIndex}`}
-                      x={x}
-                      y={baseline - 5}
-                      width={width}
-                      height={10}
-                      fill={theme.stroke}
-                      opacity={(STAGE_OPACITY[stage.stage] ?? 0.4) * 0.55}
-                      pointerEvents="none"
-                    />
-                  );
-                })}
-              </>
+              /* One plain bar. Sleep used to shade its stages here; the row
+                 reports duration now and no event carries a hypnogram. */
+              <IntervalBar
+                x={startX}
+                width={endX - startX}
+                y={baseline - 5}
+                height={10}
+                fill={missing ? `url(#${patternId})` : theme.fill}
+                opacity={missing ? 1 : 0.85}
+                continuesBefore={event.continuesBefore}
+                continuesAfter={event.continuesAfter}
+                stroke={missing ? '#c9d2de' : undefined}
+              />
             ) : (
               <>
                 {/* A nightly value summarises a window; show which one. */}

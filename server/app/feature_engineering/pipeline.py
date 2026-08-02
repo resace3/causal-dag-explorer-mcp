@@ -233,9 +233,21 @@ def _highlights(context: RuleContext, lanes: list[Lane]) -> list[str]:
         start = _parse_iso(event.metadata.get("fullStart")) or event.start_time
         end = _parse_iso(event.metadata.get("fullEnd")) or event.end_time or event.start_time
         spans = event.continues_before or event.continues_after
+        # The hours quoted here have to be the ones the two clock times span.
+        # The row's own number is time *asleep*, which is shorter, and reading
+        # it against this period's endpoints would be a sum that does not add up.
+        period = event.metadata.get("sleepPeriodMinutes")
+        if not isinstance(period, (int, float)) or period <= 0:
+            period = (end - start).total_seconds() / 60
+        asleep = event.metadata.get("minutesAsleep")
         highlights.append(
             f"Recorded sleep ran from {_format_clock(start, context)} to "
-            f"{_format_clock(end, context)}, {minutes / 60:.1f} hours"
+            f"{_format_clock(end, context)}, {period / 60:.1f} hours"
+            + (
+                f", {asleep / 60:.1f} of them asleep"
+                if isinstance(asleep, (int, float)) and asleep > 0
+                else ""
+            )
             + (" (crossing midnight)." if spans else ".")
         )
         break

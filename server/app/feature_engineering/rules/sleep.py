@@ -1,8 +1,19 @@
-"""Sleep intervals.
+"""Sleep duration.
+
+**This row is about how long, not about what happened inside.** One bar per
+sleep period, labelled with the time actually asleep. Stage-by-stage hypnograms
+are not drawn and not stored — the Google Health connector discards them where
+they arrive, and no other provider's stages reach this row either, so the row
+means the same thing whichever source filled it.
 
 Rule: prefer explicit wearable sleep records. Bed-occupancy from Home Assistant
 is only used as a fallback when the wearable supplies nothing, and the resulting
 event says so in its provenance.
+
+The bar spans the sleep *period* while its value is the time *asleep*, and the
+two differ by the minutes spent awake in bed. Both are in the details panel:
+drawing one and labelling it with the other, silently, would make a 484-minute
+bar read as 477 minutes with nothing to explain the gap.
 
 Sleep routinely crosses midnight in both directions. Intervals are clipped to
 the visible day for drawing, with `continuesBefore` / `continuesAfter` flags,
@@ -23,10 +34,35 @@ FALLBACK_RULE_ID = "sleep.sleep_interval_from_bed_occupancy"
 LANE = {
     "id": "sleep",
     "phenotype": "sleep",
-    "label": "Sleep",
-    "description": "Sleep periods and stages",
+    "label": "Sleep Duration",
+    "description": "How long each sleep period lasted",
     "accent": "orange",
 }
+
+
+def _asleep_minutes(record, period_minutes: float) -> float | None:
+    """Minutes actually asleep, when the provider is in a position to say.
+
+    Google Health reports it outright. A provider that only reports minutes
+    awake still implies it. One that reports neither gets None rather than the
+    period relabelled as sleep — time in bed is not time asleep, and this row
+    is read as a number.
+    """
+    stated = record.metadata.get("minutesAsleep")
+    if isinstance(stated, (int, float)):
+        return round(float(stated), 1)
+    if isinstance(record.awake_minutes, (int, float)):
+        return round(max(period_minutes - float(record.awake_minutes), 0.0), 1)
+    return None
+
+
+def _duration(minutes: float) -> str:
+    hours, rest = divmod(int(round(minutes)), 60)
+    if hours and rest:
+        return f"{hours}h {rest}m"
+    if hours:
+        return f"{hours}h"
+    return f"{rest}m"
 
 
 def build_lane(context: RuleContext) -> Lane:
@@ -50,22 +86,23 @@ def build_lane(context: RuleContext) -> Lane:
                 continue
             start, end, before, after = clipped
 
-            stage_minutes: dict[str, float] = {}
-            for stage in record.stages:
-                minutes = (stage.end - stage.start).total_seconds() / 60
-                stage_minutes[stage.stage] = round(
-                    stage_minutes.get(stage.stage, 0.0) + minutes, 1
-                )
+            # Time asleep when it is known, the whole period otherwise. Which
+            # of the two a number is gets recorded rather than left to be
+            # guessed from how close it is to the bar's width.
+            period_minutes = round(duration.total_seconds() / 60, 1)
+            asleep_minutes = _asleep_minutes(record, period_minutes)
+            reported = asleep_minutes if asleep_minutes is not None else period_minutes
+            basis = "time asleep" if asleep_minutes is not None else "whole sleep period"
 
             events.append(
                 TimelineEvent(
                     id=f"sleep_{record.id}",
                     phenotype="sleep",
-                    label="Main sleep" if is_main else "Nap",
+                    label=f"{'Main sleep' if is_main else 'Nap'} · {_duration(reported)}",
                     event_type="interval",
                     start_time=start,
                     end_time=end,
-                    value=round(duration.total_seconds() / 60, 1),
+                    value=reported,
                     unit="min",
                     source=payload.source_id,
                     device=record.device or payload.device,
@@ -76,23 +113,24 @@ def build_lane(context: RuleContext) -> Lane:
                     continues_before=before,
                     continues_after=after,
                     metadata={
+                        # Provider extras first: what this rule computes wins
+                        # over a same-named key carried up from the connector.
+                        **record.metadata,
                         "fullStart": record.start.isoformat(),
                         "fullEnd": record.end.isoformat(),
-                        "durationMinutes": round(duration.total_seconds() / 60, 1),
+                        # The bar's own length, so the drawn width and the
+                        # reported number are never confused for each other.
+                        "durationMinutes": reported,
+                        "durationBasis": basis,
+                        "sleepPeriodMinutes": period_minutes,
+                        "minutesAsleep": asleep_minutes,
                         "timeInBedMinutes": record.time_in_bed_minutes,
                         "awakeMinutes": record.awake_minutes,
                         "efficiency": record.efficiency,
                         "sleepScore": record.score,
-                        "stageMinutes": stage_minutes,
-                        "stages": [
-                            {
-                                "stage": stage.stage,
-                                "start": stage.start.isoformat(),
-                                "end": stage.end.isoformat(),
-                            }
-                            for stage in record.stages
-                        ],
-                        **record.metadata,
+                        # No `stages` key: this row reports duration, and the
+                        # hypnogram is dropped at the connector rather than
+                        # carried to something that will not draw it.
                     },
                     provenance=build_provenance(
                         rule=RULE_ID,
@@ -113,7 +151,11 @@ def build_lane(context: RuleContext) -> Lane:
                             if before or after
                             else []
                         ),
-                        notes=["Taken from the provider's sleep record."],
+                        notes=[
+                            "Taken from the provider's sleep record.",
+                            "Duration only: sleep stages are not stored by this "
+                            "application, so none can be shown here.",
+                        ],
                     ),
                 )
             )
@@ -161,7 +203,10 @@ def _from_bed_occupancy(context: RuleContext) -> tuple[list[TimelineEvent], str 
             TimelineEvent(
                 id=f"sleep_bed_{index}_{int(state.start_time.timestamp())}",
                 phenotype="sleep",
-                label="Time in bed" if is_main else "Short time in bed",
+                label=(
+                    f"{'Time in bed' if is_main else 'Short time in bed'} · "
+                    f"{_duration(duration.total_seconds() / 60)}"
+                ),
                 event_type="interval",
                 start_time=start,
                 end_time=end,

@@ -126,7 +126,7 @@ again.
 | Heart Rate | Continuous heart rate, or a once-a-day resting value when that is all a source publishes | Wearable |
 | Heart Rate Variability | One nightly value, attached to the sleep period it summarises | Wearable |
 | Physiological Readiness | The provider's own composite score — never relabelled "energy" | Wearable |
-| Sleep | Main sleep and naps, with stages when the provider publishes them | Wearable, or bed-occupancy as a documented fallback |
+| Sleep Duration | How long each sleep period lasted — main sleep and naps, one bar each | Google Health, or bed-occupancy as a documented fallback |
 | Skin / Wrist Temperature | Wearable temperature, labelled with the actual measurement | Wearable |
 | Environment | Light-condition blocks derived from measured illuminance, plus a room-temperature sub-line | Home Assistant |
 | Presence & Motion | Home/away, arrivals and departures, motion, door openings | Home Assistant |
@@ -146,6 +146,7 @@ the route is never implied:
 | Home Assistant | `ha-mcp` | Its REST API (faster than proxying history through the MCP server) |
 | Garmin | `garmin` | The MCP server itself, read-only `get_*` tools only |
 | ActivityWatch | `activitywatch` | The same local REST API that MCP server wraps — see [Connecting ActivityWatch](#connecting-activitywatch) |
+| Google Health | `google-health` | The MCP server itself, read-only tools only. Supplies sleep and nothing else |
 
 Leave `command` unset under `mcp.servers` and the timeline reuses the server
 definition already in your MCP client's configuration, so credentials live in
@@ -808,14 +809,15 @@ and the reconstruction warns that they were inferred.
 
 ## Wearable providers
 
-The core application is not coupled to any vendor. Three providers ship today:
+The core application is not coupled to any vendor. These providers ship today:
 
 | Provider | Use for | Capabilities |
 | --- | --- | --- |
 | `mock` | Exploring the interface with no credentials | All six metrics |
 | `json_file` | Any export you can write to a JSON schema | Whatever the file declares |
 | `home_assistant` | A wearable whose data already reaches Home Assistant (Fitbit, Withings, Google Fit) | Sleep only — see below |
-| `garmin_mcp` | A Garmin watch, through the Garmin MCP server | Sleep (with stages), HRV, continuous heart rate, activity, Body Battery |
+| `garmin_mcp` | A Garmin watch, through the Garmin MCP server | Sleep, HRV, continuous heart rate, activity, Body Battery |
+| `google_health_mcp` | Fitbit and Pixel data that reaches the Google Health API | Sleep only, deliberately |
 | `auto` | Several routes at once, tried in order per metric | The union of its routes |
 
 ### `auto`: several routes at once
@@ -826,7 +828,7 @@ Most people have more than one source, and each covers what the other misses.
 wearable:
   provider: auto
   routes:
-    - garmin_mcp       # stages + continuous HR when the watch was worn
+    - garmin_mcp       # continuous HR when the watch was worn
     - home_assistant   # the Fitbit daily summary for the nights it was not
 ```
 
@@ -834,6 +836,24 @@ The merge is per-metric and first-non-empty: for each metric the routes are
 asked in order and the first with data supplies it. Metrics are never blended,
 so a heart-rate line always comes from one device rather than being stitched
 together, and every event keeps its own source and device in the details panel.
+
+#### Pinning a metric to one source
+
+Falling through to the next route is a convenience. For a metric two sources
+both claim and *disagree* about, it is a hazard: a week's row can end up being
+two different measurements wearing one label, with nothing on screen saying
+which night came from which device.
+
+```yaml
+wearable:
+  metric_routes:
+    sleep: [google_health_mcp]
+```
+
+A metric named here uses exactly those routes and nothing else. A night Google
+Health has no record for is reported missing rather than answered by the watch,
+which is the whole point. Routes named only under `metric_routes` are built
+even when they are absent from `routes`, so a pin is never silently inert.
 
 Set it in `config.yaml`:
 
@@ -1182,6 +1202,8 @@ already installs, so there is no new image dependency.
 | Light categories | `config.yaml` → `feature_engineering.light_category.thresholds` |
 | **Workout detection** | `server/app/feature_engineering/rules/activity.py` |
 | **Sleep intervals** | `server/app/feature_engineering/rules/sleep.py` |
+| **Where sleep comes from** | `config.yaml` → `wearable.metric_routes.sleep` |
+| Google Health sleep parsing | `server/app/connectors/wearables/google_health_mcp.py` |
 | **Elevated heart rate / baselines** | `server/app/feature_engineering/rules/heart_rate.py` |
 | **HRV handling** | `server/app/feature_engineering/rules/hrv.py` |
 | **Readiness** | `server/app/feature_engineering/rules/readiness.py` |
@@ -1217,6 +1239,12 @@ already installs, so there is no new image dependency.
   in device-tracker attributes; the connector keeps only the state string, so
   they never enter the data model at all. A test walks the serialised lane and
   fails if any field carries one.
+- **Sleep stages are discarded at the connector.** Google Health returns a
+  full hypnogram — every deep/REM/light/awake stretch of the night. The Sleep
+  Duration row reports how long, so the stages are dropped where they arrive
+  rather than ignored at render time, and never reach SQLite, the API or the
+  browser. What is stored is the period, how much of it was asleep, and whether
+  the provider called it main sleep or a nap.
 - **Computer use is reduced before it is stored.** `activitywatch.detail`
   decides what the connector keeps, and anything above that level is dropped
   where the events arrive rather than hidden at render time — so it never
@@ -1353,9 +1381,12 @@ Set `API_PORT` / `FRONTEND_PORT` in `.env`.
   on. A second machine needs its own watcher, and if one server collects both,
   `activitywatch.hostname` picks which one the day describes rather than the two
   being merged.
-- **Sleep stages depend on the provider.** The `home_assistant` provider gets
-  daily summaries, so it reports an interval with no stages rather than
-  inventing a hypnogram.
+- **Sleep is a duration, not a hypnogram.** The Sleep Duration row reports how
+  long each period lasted. Google Health returns full stage data and the
+  connector discards it, so no stage detail exists anywhere in the application —
+  in the database, the API or the DAG. Sleep onset and sleep efficiency are
+  consequently unmeasured variables: the arrows into them still state what an
+  analysis would have to assume, but nothing observes them.
 - **Step-derived activity is smeared by sync interval.** A counter that syncs
   every 30 minutes locates movement to within 30 minutes, and the rule says so
   in each event's provenance. It never names an exercise type from cadence.
