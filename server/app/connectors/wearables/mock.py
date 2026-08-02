@@ -24,6 +24,7 @@ from .base import (
     HRVPoint,
     ReadinessRecord,
     SleepStage,
+    StepBucket,
     TemperaturePoint,
     WearableCapabilities,
     WearableSleepRecord,
@@ -39,6 +40,24 @@ CHARGING_GAP_END = time(16, 35)
 
 def _jitter(rng: random.Random, spread: float) -> float:
     return rng.uniform(-spread, spread)
+
+
+def _mock_steps_in_minute(plan: "DayPlan", moment: datetime, rng: random.Random) -> int:
+    """Steps in one minute: none asleep, a cadence during exercise, a little otherwise."""
+    if plan.asleep_at(moment):
+        return 0
+    activity = plan.activity_at(moment)
+    if activity is not None:
+        kind = activity[2]
+        if kind == "running":
+            return rng.randint(150, 180)
+        if kind == "walk":
+            return rng.randint(95, 125)
+        return rng.randint(0, 25)  # strength training moves the wrist, not the feet
+    # Ordinary waking minutes: mostly still, occasionally crossing a room.
+    if rng.random() < 0.72:
+        return 0
+    return rng.randint(4, 45)
 
 
 class DayPlan:
@@ -182,6 +201,36 @@ class MockWearableProvider(BaseWearableProvider):
                 f"{self.seed}. No wearable account is connected."
             ),
         )
+
+    async def get_steps(self, start: datetime, end: datetime) -> list[StepBucket]:
+        """Per-minute step buckets, the shape a real step source records.
+
+        Minutes with no steps are **omitted**, not sent as zero, because that is
+        what the API this models does — and a mock that helpfully sent zeros all
+        night would never exercise the rule's decision to read an absent minute
+        as zero rather than as missing data.
+        """
+        buckets: list[StepBucket] = []
+        for plan in self._plans_covering(start, end):
+            cursor = datetime.combine(plan.day, time(0, 0), tzinfo=self.tz)
+            finish = cursor + timedelta(days=1)
+            rng = random.Random(self.seed * 7717 + plan.day.toordinal())
+            while cursor < finish:
+                if start <= cursor < end:
+                    steps = _mock_steps_in_minute(plan, cursor, rng)
+                    if steps:
+                        buckets.append(
+                            StepBucket(
+                                start=cursor,
+                                end=cursor + timedelta(minutes=1),
+                                count=steps,
+                                device=self.device,
+                                metadata={"recordingMethod": "PASSIVELY_MEASURED"},
+                            )
+                        )
+                cursor += timedelta(minutes=1)
+        buckets.sort(key=lambda bucket: bucket.start)
+        return buckets
 
     async def get_sleep(self, start: datetime, end: datetime) -> list[WearableSleepRecord]:
         records: list[WearableSleepRecord] = []

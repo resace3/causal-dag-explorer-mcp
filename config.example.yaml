@@ -145,18 +145,38 @@ wearable:
   # mock            - deterministic synthetic data, no credentials required
   # json_file       - read an export written by your own tooling
   # home_assistant  - a wearable whose data already reaches Home Assistant
-  # garmin_mcp      - the Garmin MCP server (sleep stages, continuous heart
-  #                   rate, Body Battery, real activity records)
+  # garmin_mcp      - the Garmin MCP server (continuous heart rate, Body
+  #                   Battery, real activity records)
+  # google_health_mcp - the Google Health MCP server, sleep only
   provider: mock
   device_name: Mock Band 3
 
   json_file:
     path: ./data/wearable.json
 
+  # Used when provider is `auto`: routes are tried in this order, per metric,
+  # and the first with data supplies it. Metrics are never blended.
+  # routes: [garmin_mcp, home_assistant]
+
+  # Per-metric override of `routes`. A metric named here uses exactly these
+  # routes and nothing else, so a night the source missed is reported missing
+  # rather than filled in by another device. Use it when two sources both claim
+  # a metric and disagree — a row that silently alternated between them would
+  # look like one measurement and be two.
+  # metric_routes:
+  #   sleep: [google_health_mcp]
+
   # Used when provider is `garmin_mcp`. Only read-only get_* tools are called.
   garmin_mcp:
     device_name: Garmin
     mcp_server: garmin
+
+  # Sleep only, deliberately: the same API carries steps and heart rate, and a
+  # route that claimed them would start winning metrics nobody pointed it at.
+  # The stage-by-stage hypnogram it returns is discarded at the connector.
+  google_health_mcp:
+    device_name: Google Health
+    mcp_server: google-health
 
   # Used when provider is `home_assistant`. Fitbit/Withings/Google Fit style
   # integrations publish the night's sleep as once-a-day summary sensors; the
@@ -230,7 +250,18 @@ feature_engineering:
     rule_version: "1.0.0"
     min_duration_minutes: 150
 
-  # Turns a cumulative step counter into a step-rate line plus walking periods.
+  # The step-rate line beneath the Activity row, plus walking periods.
+  #
+  # Steps reach it in one of two shapes. A wearable route that exposes the
+  # `steps` capability sends interval buckets — "37 steps in this minute" — and
+  # `bucket_minutes` says how coarsely to bin them. Otherwise the cumulative
+  # counter under `entities.steps` is differenced instead.
+  #
+  # Bins wider than the source's own resolution blunt the edges of a walk: a
+  # 45-minute walk whose tail lands in a half-empty 30-minute bin is reported as
+  # 30 minutes, because that bin's *average* cadence falls under the threshold.
+  # No steps are lost from the day's total, only from the named period. With
+  # per-minute buckets, 5-10 minutes is a better fit than 30.
   step_activity:
     rule_version: "1.0.0"
     bucket_minutes: 30

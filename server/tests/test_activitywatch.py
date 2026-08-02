@@ -256,6 +256,43 @@ async def test_idle_shorter_than_the_tolerance_does_not_split_a_session(
     assert sessions[0].metadata["durationMinutes"] == pytest.approx(63, abs=0.2)
 
 
+@pytest.mark.parametrize(
+    ("gap_minutes", "expected_sessions"),
+    [(14, 1), (16, 2)],
+)
+async def test_the_merge_tolerance_is_what_decides_one_sitting_from_two(
+    live_settings, new_york, sync_service, gap_minutes, expected_sessions
+):
+    """Raising `merge_within_minutes` to 15 joins stretches under a quarter hour.
+
+    The bridged minutes are counted inside the merged bar, so the row's total is
+    time *at the desk* rather than time typing. That is the trade the threshold
+    makes, and it is why the number lives in config rather than in the rule.
+    """
+    sync_service.config.feature_engineering.computer_use.merge_within_minutes = 15
+
+    window, start, _end = _day(new_york)
+    first = window.start + timedelta(hours=9)
+    afk = [
+        _event(first, 20, {"status": "not-afk"}),
+        _event(first + timedelta(minutes=20 + gap_minutes), 20, {"status": "not-afk"}),
+    ]
+    connector = _connector(
+        _fake_server(afk=afk, window=[_event(first, 20, {"app": "code.exe"})]),
+        live_settings,
+        new_york,
+    )
+    result = await connector.fetch(start, start + timedelta(days=2))
+    lane = computer_use.build_lane(_context(result.records, new_york, sync_service))
+
+    sessions = [event for event in lane.events if event.category == "at_computer"]
+    assert len(sessions) == expected_sessions
+    if expected_sessions == 1:
+        # 20 + 14 idle + 20: the gap is inside the bar, and the note says so.
+        assert sessions[0].metadata["durationMinutes"] == pytest.approx(54, abs=0.2)
+        assert "idle spells shorter than 15 minutes" in sessions[0].metadata["note"]
+
+
 async def test_applications_are_named_and_carry_full_provenance(
     live_settings, new_york, sync_service
 ):

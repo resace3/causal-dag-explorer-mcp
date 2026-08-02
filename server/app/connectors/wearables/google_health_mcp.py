@@ -1,9 +1,18 @@
-"""Sleep read from the Google Health MCP server.
+"""Sleep and steps read from the Google Health MCP server.
 
-Sleep only. Google Health also carries steps, heart rate and more, but those
-lanes already have sources on this machine, and a provider that claimed
-capabilities it was not configured to be the answer for would start winning
-metrics nobody asked it for.
+Two metrics, not everything on offer. The same API also carries heart rate,
+oxygen saturation, VO2 max and a dozen more, all of which either have a source
+on this machine already or have no row to appear in; a provider that claimed
+capabilities it was not configured to answer for would start winning metrics
+nobody pointed it at. Each capability here was added deliberately, one at a
+time, because a row was asked to come from it.
+
+Steps arrive as **per-minute deltas** — "37 steps between 18:24 and 18:25" —
+which is the shape the source actually records. The daily counter that reaches
+Home Assistant is the same data accumulated and then resampled by whenever the
+watch happened to sync, so it says the day's total accurately and says *when*
+the steps happened only approximately. That is the whole reason for reading
+them here instead.
 
 **Everything below the sleep period is discarded here, at the connector.** The
 API returns a full hypnogram — every deep/REM/light/awake stretch of the night,
@@ -28,7 +37,9 @@ from ...config.schema import GoogleHealthMcpConfig, McpServerConfig
 from ..mcp_client import McpClientError, open_session
 from .base import (
     CAPABILITY_SLEEP,
+    CAPABILITY_STEPS,
     BaseWearableProvider,
+    StepBucket,
     WearableCapabilities,
     WearableProviderError,
     WearableSleepRecord,
@@ -50,6 +61,13 @@ DATA_POINTS_TOOL = "google_health_list_data_points"
 MAX_PAGES = 6
 PAGE_SIZE = 100
 
+#: Steps are one bucket per minute, so a 50-hour fetch window is up to 3000 of
+#: them where a night of sleep is one. Same paging, an order of magnitude more
+#: of it — at the sleep page size this would give up six pages into yesterday
+#: morning and silently report a third of a day.
+STEPS_PAGE_SIZE = 1000
+STEPS_MAX_PAGES = 12
+
 
 class GoogleHealthMcpProvider(BaseWearableProvider):
     name = PROVIDER_NAME
@@ -62,6 +80,7 @@ class GoogleHealthMcpProvider(BaseWearableProvider):
         self.tz = tz
         self._capabilities: WearableCapabilities | None = None
         self._cache: dict[tuple[datetime, datetime], list[WearableSleepRecord]] = {}
+        self._steps_cache: dict[tuple[datetime, datetime], list[StepBucket]] = {}
 
     # -- capabilities ----------------------------------------------------
 
@@ -92,7 +111,7 @@ class GoogleHealthMcpProvider(BaseWearableProvider):
                 f"{DATA_POINTS_TOOL}, so no sleep can be read from it."
             )
 
-        detail = f"Sleep from {self.config.device_name}"
+        detail = f"Sleep and steps from {self.config.device_name}"
         if isinstance(status, dict):
             # An expired access token is normal and refreshes itself; a missing
             # refresh token is not, and is worth saying before a day looks empty.
@@ -103,7 +122,7 @@ class GoogleHealthMcpProvider(BaseWearableProvider):
         self._capabilities = WearableCapabilities(
             provider=PROVIDER_NAME,
             device=self.config.device_name,
-            capabilities=[CAPABILITY_SLEEP],
+            capabilities=[CAPABILITY_SLEEP, CAPABILITY_STEPS],
             status="connected",
             detail=detail,
         )
@@ -117,7 +136,7 @@ class GoogleHealthMcpProvider(BaseWearableProvider):
             return self._cache[key]
 
         try:
-            points = await self._load_points(start)
+            points = await self._load_points("sleep", start, PAGE_SIZE, MAX_PAGES)
         except McpClientError as exc:
             raise WearableProviderError(str(exc)) from exc
 
@@ -136,8 +155,10 @@ class GoogleHealthMcpProvider(BaseWearableProvider):
         self._cache[key] = records
         return records
 
-    async def _load_points(self, start: datetime) -> list[dict[str, Any]]:
-        """Page back through sleep records until one predates the window."""
+    async def _load_points(
+        self, data_type: str, start: datetime, page_size: int, max_pages: int
+    ) -> list[dict[str, Any]]:
+        """Page back through records of one type until one predates the window."""
         collected: list[dict[str, Any]] = []
         token: str | None = None
 
@@ -147,10 +168,10 @@ class GoogleHealthMcpProvider(BaseWearableProvider):
             ALLOWED_TOOLS,
             startup_timeout=self.server.startup_timeout_seconds,
         ) as session:
-            for _page in range(MAX_PAGES):
+            for _page in range(max_pages):
                 arguments: dict[str, Any] = {
-                    "data_type": "sleep",
-                    "page_size": PAGE_SIZE,
+                    "data_type": data_type,
+                    "page_size": page_size,
                     "response_format": "json",
                 }
                 if token:
@@ -158,14 +179,24 @@ class GoogleHealthMcpProvider(BaseWearableProvider):
 
                 payload = await session.call_json(DATA_POINTS_TOOL, arguments)
                 page = _data_points(payload)
+                token = _next_page_token(payload)
+
+                # An empty page is not the end of the data. The first page of
+                # steps comes back empty with a token, and stopping there would
+                # report a day with no movement on it.
                 if not page:
-                    break
+                    if not token:
+                        break
+                    continue
+
                 collected.extend(page)
 
                 oldest = min(
                     (
                         stamp
-                        for stamp in (_start_of(point, self.tz) for point in page)
+                        for stamp in (
+                            _start_of(point, data_type, self.tz) for point in page
+                        )
                         if stamp is not None
                     ),
                     default=None,
@@ -173,11 +204,76 @@ class GoogleHealthMcpProvider(BaseWearableProvider):
                 if oldest is not None and oldest <= start:
                     break
 
-                token = _next_page_token(payload)
                 if not token:
                     break
 
         return collected
+
+    # -- steps -----------------------------------------------------------
+
+    async def get_steps(self, start: datetime, end: datetime) -> list[StepBucket]:
+        key = (start, end)
+        if key in self._steps_cache:
+            return self._steps_cache[key]
+
+        try:
+            points = await self._load_points(
+                "steps", start, STEPS_PAGE_SIZE, STEPS_MAX_PAGES
+            )
+        except McpClientError as exc:
+            raise WearableProviderError(str(exc)) from exc
+
+        buckets: list[StepBucket] = []
+        for point in points:
+            bucket = self._to_bucket(point)
+            if bucket is None:
+                continue
+            # Containment, not overlap: a step bucket is a minute long and
+            # belongs to whichever side of the boundary it started on. Counting
+            # a straddling bucket into both days would double those steps.
+            if bucket.start < start or bucket.start >= end:
+                continue
+            buckets.append(bucket)
+
+        chosen, rejected = _one_source_only(buckets)
+
+        # Within the winning source, a repeated start would still be a double.
+        seen: dict[datetime, StepBucket] = {}
+        for bucket in sorted(chosen, key=lambda item: item.start):
+            seen.setdefault(bucket.start, bucket)
+
+        ordered = sorted(seen.values(), key=lambda item: item.start)
+        if ordered and rejected:
+            ordered[0].metadata["chosenOver"] = rejected
+        self._steps_cache[key] = ordered
+        return ordered
+
+    def _to_bucket(self, point: dict[str, Any]) -> StepBucket | None:
+        steps = point.get("steps")
+        if not isinstance(steps, dict):
+            return None
+
+        interval = steps.get("interval") or {}
+        begin = _parse_stamp(interval.get("startTime"), self.tz)
+        finish = _parse_stamp(interval.get("endTime"), self.tz)
+        if begin is None or finish is None or finish <= begin:
+            return None
+
+        count = _number(steps.get("count"))
+        if count is None or count < 0:
+            return None
+
+        source = point.get("dataSource") or {}
+        return StepBucket(
+            start=begin,
+            end=finish,
+            count=count,
+            device=(source.get("device") or {}).get("displayName"),
+            metadata={
+                "recordingMethod": source.get("recordingMethod"),
+                "platform": source.get("platform"),
+            },
+        )
 
     def _to_record(self, point: dict[str, Any]) -> WearableSleepRecord | None:
         sleep = point.get("sleep")
@@ -229,6 +325,53 @@ class GoogleHealthMcpProvider(BaseWearableProvider):
         )
 
 
+def _one_source_only(
+    buckets: list[StepBucket],
+) -> tuple[list[StepBucket], list[dict[str, Any]]]:
+    """Keep one device's step buckets and report the rest as discarded.
+
+    Google Health hands back every source it holds, and a phone in a pocket and
+    a watch on a wrist are both counting the same feet. Their buckets do not
+    line up — the watch reports whole minutes, the phone reports ragged
+    intervals starting mid-second — so they cannot be deduplicated by timestamp
+    and summing them silently inflates the day by whatever fraction was walked
+    with both. Google's own daily rollup answers with one source's total, and so
+    does this.
+
+    The source that observed the most of the day wins, which keeps the watch on
+    a day it was worn and falls to the phone on a day it was not. Never a blend:
+    a day that mixed the two would be a number no device ever measured.
+    """
+    groups: dict[tuple[str | None, str | None], list[StepBucket]] = {}
+    for bucket in buckets:
+        key = (bucket.device, bucket.metadata.get("platform"))
+        groups.setdefault(key, []).append(bucket)
+
+    if not groups:
+        return [], []
+    if len(groups) == 1:
+        return next(iter(groups.values())), []
+
+    def covered(items: list[StepBucket]) -> float:
+        return sum((item.end - item.start).total_seconds() for item in items)
+
+    ranked = sorted(
+        groups.items(),
+        key=lambda item: (-covered(item[1]), -len(item[1]), str(item[0])),
+    )
+    chosen = ranked[0][1]
+    rejected = [
+        {
+            "device": key[0],
+            "platform": key[1],
+            "buckets": len(items),
+            "steps": int(round(sum(item.count for item in items))),
+        }
+        for key, items in ranked[1:]
+    ]
+    return chosen, rejected
+
+
 # --------------------------------------------------------------------------
 # Payload shapes
 # --------------------------------------------------------------------------
@@ -262,8 +405,8 @@ def _point_id(point: dict[str, Any]) -> str:
     return str(interval.get("startTime") or "unknown")
 
 
-def _start_of(point: dict[str, Any], tz: ZoneInfo) -> datetime | None:
-    interval = (point.get("sleep") or {}).get("interval") or {}
+def _start_of(point: dict[str, Any], data_type: str, tz: ZoneInfo) -> datetime | None:
+    interval = (point.get(data_type) or {}).get("interval") or {}
     return _parse_stamp(interval.get("startTime"), tz)
 
 
@@ -282,6 +425,11 @@ def _parse_stamp(value: Any, tz: ZoneInfo) -> datetime | None:
 
 def _minutes(value: Any) -> float | None:
     """The summary sends minutes as strings."""
+    return _number(value)
+
+
+def _number(value: Any) -> float | None:
+    """This API sends numbers as strings — minutes, and step counts alike."""
     if value in (None, ""):
         return None
     try:
@@ -290,4 +438,12 @@ def _minutes(value: Any) -> float | None:
         return None
 
 
-__all__ = ["GoogleHealthMcpProvider", "PROVIDER_NAME", "ALLOWED_TOOLS", "MAX_PAGES", "PAGE_SIZE"]
+__all__ = [
+    "GoogleHealthMcpProvider",
+    "PROVIDER_NAME",
+    "ALLOWED_TOOLS",
+    "MAX_PAGES",
+    "PAGE_SIZE",
+    "STEPS_MAX_PAGES",
+    "STEPS_PAGE_SIZE",
+]

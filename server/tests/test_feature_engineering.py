@@ -225,7 +225,20 @@ async def test_mock_provider_declares_every_capability(new_york):
         "activity",
         "temperature",
         "readiness",
+        "steps",
     }
+
+
+async def test_mock_provider_serves_every_capability_it_declares(new_york):
+    """Declaring a metric and returning nothing for it is how a lane goes blank
+    with no explanation. The mock must not be the thing that teaches that."""
+    provider = MockWearableProvider(new_york, seed=42)
+    start = datetime(2025, 6, 10, tzinfo=new_york)
+    end = start + timedelta(days=1)
+
+    for capability in (await provider.get_capabilities()).capabilities:
+        result = await getattr(provider, f"get_{capability}")(start, end)
+        assert result, f"the mock claims '{capability}' but returned nothing"
 
 
 async def test_mock_heart_rate_has_a_charging_gap(new_york):

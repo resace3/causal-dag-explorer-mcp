@@ -24,6 +24,7 @@ CAPABILITY_HRV = "hrv"
 CAPABILITY_ACTIVITY = "activity"
 CAPABILITY_TEMPERATURE = "temperature"
 CAPABILITY_READINESS = "readiness"
+CAPABILITY_STEPS = "steps"
 
 ALL_CAPABILITIES = (
     CAPABILITY_SLEEP,
@@ -32,6 +33,7 @@ ALL_CAPABILITIES = (
     CAPABILITY_ACTIVITY,
     CAPABILITY_TEMPERATURE,
     CAPABILITY_READINESS,
+    CAPABILITY_STEPS,
 )
 
 
@@ -101,6 +103,23 @@ class ActivityRecord(CamelModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class StepBucket(CamelModel):
+    """Steps counted in one interval — a delta, not a running total.
+
+    This is the shape a step *source* has natively: "37 steps between 18:24 and
+    18:25". The daily counters that reach Home Assistant are the same data
+    accumulated and resampled, which loses when the steps happened. A provider
+    exposing this capability must send deltas; feeding a cumulative total in
+    here would be differenced a second time and produce nonsense.
+    """
+
+    start: datetime
+    end: datetime
+    count: float
+    device: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class TemperaturePoint(CamelModel):
     timestamp: datetime
     value: float
@@ -140,6 +159,8 @@ class WearableProvider(Protocol):
 
     async def get_readiness(self, start: datetime, end: datetime) -> list[ReadinessRecord]: ...
 
+    async def get_steps(self, start: datetime, end: datetime) -> list[StepBucket]: ...
+
 
 class BaseWearableProvider:
     """Convenience base returning empty results for unsupported metrics."""
@@ -165,6 +186,9 @@ class BaseWearableProvider:
         return []
 
     async def get_readiness(self, start: datetime, end: datetime) -> list[ReadinessRecord]:
+        return []
+
+    async def get_steps(self, start: datetime, end: datetime) -> list[StepBucket]:
         return []
 
 

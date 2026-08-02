@@ -18,6 +18,7 @@ from .base import (
     HeartRatePoint,
     HRVPoint,
     ReadinessRecord,
+    StepBucket,
     TemperaturePoint,
     WearableCapabilities,
     WearableProvider,
@@ -38,6 +39,7 @@ class WearablePayload:
     activity: list[ActivityRecord] = field(default_factory=list)
     temperature: list[TemperaturePoint] = field(default_factory=list)
     readiness: list[ReadinessRecord] = field(default_factory=list)
+    steps: list[StepBucket] = field(default_factory=list)
     raw_records: list[RawRecord] = field(default_factory=list)
     capabilities: WearableCapabilities | None = None
     status: SourceStatus = "disconnected"
@@ -93,6 +95,7 @@ class WearableConnector:
             ("activity", self.provider.get_activity, "activity"),
             ("temperature", self.provider.get_temperature, "temperature"),
             ("readiness", self.provider.get_readiness, "readiness"),
+            ("steps", self.provider.get_steps, "steps"),
         )
 
         for capability, fetch, attribute in fetchers:
@@ -178,6 +181,20 @@ class WearableConnector:
                     value=point.value,
                     unit=point.unit,
                     attributes={"measurement": point.measurement},
+                )
+            )
+        for bucket in payload.steps:
+            records.append(
+                RawRecord(
+                    id=RawRecord.make_id(source, "step_bucket", bucket.start.isoformat()),
+                    source=source,
+                    stream="step_bucket",
+                    device=bucket.device or device,
+                    timestamp=bucket.start,
+                    end_timestamp=bucket.end,
+                    value=bucket.count,
+                    unit="steps",
+                    attributes=bucket.model_dump(mode="json"),
                 )
             )
         for record in payload.readiness:

@@ -30,6 +30,7 @@ from .base import (
     HeartRatePoint,
     HRVPoint,
     ReadinessRecord,
+    StepBucket,
     TemperaturePoint,
     WearableCapabilities,
     WearableProvider,
@@ -147,6 +148,9 @@ class CompositeWearableProvider(BaseWearableProvider):
 
     async def get_readiness(self, start: datetime, end: datetime) -> list[ReadinessRecord]:
         return await self._first("readiness", "get_readiness", start, end)
+
+    async def get_steps(self, start: datetime, end: datetime) -> list[StepBucket]:
+        return await self._first("steps", "get_steps", start, end)
 
     @property
     def errors(self) -> dict[str, str]:
