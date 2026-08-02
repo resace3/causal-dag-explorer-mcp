@@ -15,13 +15,14 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { LaneIcon } from '../components/Icons';
 import { useElementWidth } from '../hooks/useElementWidth';
+import { useNow } from '../hooks/useNow';
 import type { RangeDay } from '../hooks/useDayRange';
 import { Mark, approximateTextWidth, describeEvent, eventTooltip } from '../lanes/shared';
 import type { DayTimeline, Lane, Selection, TimelineEvent } from '../types/timeline';
 import { AXIS_HEIGHT, LANE_LABEL_WIDTH, MAJOR_CATEGORIES, accentTheme } from '../utilities/lanes';
-import { formatIsoDate, formatTimeRange } from '../utilities/time';
+import { formatIsoDate, formatTimeRange, toDate } from '../utilities/time';
 import { AxisRow, GridLines } from './Axis';
-import { createScale } from './scale';
+import { createScale, nowPosition } from './scale';
 
 const HEIGHT = 250;
 const BASELINE = 132;
@@ -529,6 +530,11 @@ function LoadedDay({
     [timeline.dayStart, timeline.dayEnd, timeline.localTimezone, width],
   );
 
+  // The same ruler, so the same marker — a day in progress reads the same way
+  // on either tab.
+  const now = useNow(toDate(timeline.dayEnd).getTime() > Date.now());
+  const nowX = nowPosition(now, scale);
+
   const items = useMemo(
     () => collapsedEvents(timeline.lanes, visible, curated, allEvents),
     [timeline.lanes, visible, curated, allEvents],
@@ -613,7 +619,7 @@ function LoadedDay({
 
   return (
     <div style={{ width }}>
-      <AxisRow scale={scale} position="top" />
+      <AxisRow scale={scale} position="top" nowX={nowX} />
       <svg
         width={width}
         height={HEIGHT}
@@ -763,7 +769,7 @@ function LoadedDay({
           );
         })}
       </svg>
-      <AxisRow scale={scale} position="bottom" />
+      <AxisRow scale={scale} position="bottom" nowX={nowX} />
     </div>
   );
 }

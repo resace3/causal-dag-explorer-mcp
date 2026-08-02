@@ -1,7 +1,46 @@
 import { describe, expect, it } from 'vitest';
-import { PAD_LEFT, PAD_RIGHT, axisTicks, createScale, createValueScale } from '../src/timeline/scale';
+import {
+  PAD_LEFT,
+  PAD_RIGHT,
+  axisTicks,
+  createScale,
+  createValueScale,
+  nowPosition,
+} from '../src/timeline/scale';
 
 const TZ = 'America/New_York';
+
+describe('the current-time line', () => {
+  const day = () =>
+    createScale('2025-06-10T00:00:00-04:00', '2025-06-11T00:00:00-04:00', 1000, TZ);
+
+  it('places the line at the current time', () => {
+    const noon = new Date('2025-06-10T12:00:00-04:00');
+    expect(nowPosition(noon, day())).toBeCloseTo(
+      PAD_LEFT + (1000 - PAD_LEFT - PAD_RIGHT) / 2,
+      5,
+    );
+  });
+
+  it('draws nothing on a day that has already ended', () => {
+    // The trap: x() clamps, so without the bounds check every past day would
+    // get a red line pinned to midnight, claiming to be the present.
+    expect(nowPosition(new Date('2025-08-01T09:00:00-04:00'), day())).toBeNull();
+  });
+
+  it('draws nothing on a day that has not started', () => {
+    expect(nowPosition(new Date('2025-06-09T09:00:00-04:00'), day())).toBeNull();
+  });
+
+  it('draws nothing when there is no current time to draw', () => {
+    expect(nowPosition(null, day())).toBeNull();
+  });
+
+  it('excludes the closing midnight, which belongs to the next day', () => {
+    expect(nowPosition(new Date('2025-06-11T00:00:00-04:00'), day())).toBeNull();
+    expect(nowPosition(new Date('2025-06-10T23:59:00-04:00'), day())).not.toBeNull();
+  });
+});
 
 describe('time-to-x scale', () => {
   it('maps the day onto the drawable width', () => {

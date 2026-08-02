@@ -96,6 +96,9 @@ export const MAJOR_CATEGORIES = new Set([
   'tv_playing',
 ]);
 
+/** The current-time line. The only red in the timeline, so it reads as "here". */
+export const NOW_LINE = '#dc2626';
+
 export const GRID_LINE = '#e6ebf2';
 export const GRID_LINE_MINOR = '#f1f4f9';
 export const BASELINE = '#dfe6ef';

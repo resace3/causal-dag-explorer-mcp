@@ -64,6 +64,20 @@ export function createScale(
   };
 }
 
+/**
+ * Where "now" falls on this day's ruler, or null if it does not fall on it.
+ *
+ * The bounds check is the whole of it. `x()` clamps its input to the day, so
+ * asking it for the current time on a day that has already ended returns the
+ * position of midnight — a red line pinned to the right-hand edge of every past
+ * day, claiming to be the present.
+ */
+export function nowPosition(now: Date | null, scale: DayScale): number | null {
+  if (now === null) return null;
+  if (now < scale.dayStart || now >= scale.dayEnd) return null;
+  return scale.x(now);
+}
+
 function formatHourLabel(hour: number): string {
   if (hour === 0 || hour === 24) return '12 AM';
   if (hour === 12) return '12 PM';

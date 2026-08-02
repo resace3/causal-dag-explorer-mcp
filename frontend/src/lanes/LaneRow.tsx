@@ -10,6 +10,8 @@ import { EventLane } from './EventLane';
 import { LocationLane } from './LocationLane';
 import { PhoneUseLane } from './PhoneUseLane';
 import { PresenceLane } from './PresenceLane';
+import { NowLine } from '../timeline/Axis';
+import { TvLane } from './TvLane';
 import { laneAriaLabel, type LaneRenderProps } from './shared';
 
 /** Each lane picks the clearest encoding for its data; the x-axis is shared. */
@@ -175,6 +177,8 @@ interface LanePlotProps {
   selectedKey: string | null;
   onSelect: (selection: Selection) => void;
   gridLines: JSX.Element;
+  /** x of the current time, or null on a day that does not contain one. */
+  nowX?: number | null;
 }
 
 export function LanePlot({
@@ -184,6 +188,7 @@ export function LanePlot({
   selectedKey,
   onSelect,
   gridLines,
+  nowX = null,
 }: LanePlotProps) {
   const height = laneHeight(lane.id);
   const theme = accentTheme(lane.accent);
@@ -211,6 +216,7 @@ export function LanePlot({
           selectedKey={selectedKey}
           onSelect={onSelect}
         />
+        {nowX !== null ? <NowLine x={nowX} height={height} /> : null}
       </svg>
     </div>
   );

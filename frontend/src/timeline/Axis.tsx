@@ -1,7 +1,16 @@
-import { AXIS_HEIGHT, GRID_LINE, GRID_LINE_MINOR } from '../utilities/lanes';
+import { AXIS_HEIGHT, GRID_LINE, GRID_LINE_MINOR, NOW_LINE } from '../utilities/lanes';
 import { axisTicks, minorTickPositions, type DayScale } from './scale';
 
-export function AxisRow({ scale, position }: { scale: DayScale; position: 'top' | 'bottom' }) {
+export function AxisRow({
+  scale,
+  position,
+  nowX = null,
+}: {
+  scale: DayScale;
+  position: 'top' | 'bottom';
+  /** x of the current time, or null on a day that does not contain one. */
+  nowX?: number | null;
+}) {
   const ticks = axisTicks(scale);
   const y = position === 'top' ? AXIS_HEIGHT - 10 : 18;
 
@@ -26,7 +35,56 @@ export function AxisRow({ scale, position }: { scale: DayScale; position: 'top' 
           {tick.label}
         </text>
       ))}
+
+      {/* The line runs through every lane; the axis gives it a name, once, so
+          it does not read as a stray mark in one of them. */}
+      {nowX !== null ? (
+        <g pointerEvents="none">
+          <line
+            x1={nowX}
+            x2={nowX}
+            y1={position === 'top' ? AXIS_HEIGHT - 6 : 0}
+            y2={position === 'top' ? AXIS_HEIGHT : 6}
+            stroke={NOW_LINE}
+            strokeWidth={1.5}
+          />
+          {position === 'top' ? (
+            <text
+              x={nowX}
+              y={11}
+              textAnchor="middle"
+              fontSize={9.5}
+              fontWeight={600}
+              fill={NOW_LINE}
+            >
+              Now
+            </text>
+          ) : null}
+        </g>
+      ) : null}
     </svg>
+  );
+}
+
+/**
+ * The current-time line, drawn inside a lane.
+ *
+ * Rendered after the lane's own marks rather than with the grid, because a wide
+ * interval bar would otherwise cover it — and a "now" line you cannot see
+ * during the very session you are looking at is the case it exists for.
+ */
+export function NowLine({ x, height }: { x: number; height: number }) {
+  return (
+    <line
+      x1={x}
+      x2={x}
+      y1={0}
+      y2={height}
+      stroke={NOW_LINE}
+      strokeWidth={1.5}
+      pointerEvents="none"
+      data-testid="now-line"
+    />
   );
 }
 

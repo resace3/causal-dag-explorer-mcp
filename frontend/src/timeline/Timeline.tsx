@@ -9,10 +9,12 @@ import { useMemo, useState } from 'react';
 import { LaneLabel, LanePlot } from '../lanes/LaneRow';
 import type { DayTimeline, Lane, Selection } from '../types/timeline';
 import { useElementWidth } from '../hooks/useElementWidth';
+import { useNow } from '../hooks/useNow';
 import { AXIS_HEIGHT, LANE_LABEL_WIDTH, laneHeight } from '../utilities/lanes';
+import { toDate } from '../utilities/time';
 import { AddRow } from './AddRow';
 import { AxisRow, GridLines } from './Axis';
-import { createScale } from './scale';
+import { createScale, nowPosition } from './scale';
 
 const MIN_PLOT_WIDTH = 560;
 
@@ -61,6 +63,11 @@ export function Timeline({
     () => createScale(timeline.dayStart, timeline.dayEnd, plotWidth, timeline.localTimezone),
     [timeline.dayStart, timeline.dayEnd, timeline.localTimezone, plotWidth],
   );
+
+  // A day that has already ended has no present moment on it, so no timer is
+  // held open for one.
+  const now = useNow(toDate(timeline.dayEnd).getTime() > Date.now());
+  const nowX = nowPosition(now, scale);
 
   const gridByHeight = useMemo(() => {
     const cache = new Map<number, JSX.Element>();
@@ -119,7 +126,7 @@ export function Timeline({
 
       <div ref={ref} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
         <div style={{ width: plotWidth }}>
-          <AxisRow scale={scale} position="top" />
+          <AxisRow scale={scale} position="top" nowX={nowX} />
           {lanes.map((lane) => (
             <LanePlot
               key={lane.id}
@@ -129,9 +136,10 @@ export function Timeline({
               selectedKey={selectedKey}
               onSelect={onSelect}
               gridLines={gridByHeight.get(laneHeight(lane.id)) ?? <GridLines scale={scale} height={laneHeight(lane.id)} />}
+              nowX={nowX}
             />
           ))}
-          <AxisRow scale={scale} position="bottom" />
+          <AxisRow scale={scale} position="bottom" nowX={nowX} />
         </div>
       </div>
       </div>
