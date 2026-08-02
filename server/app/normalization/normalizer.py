@@ -39,6 +39,9 @@ STATE_STREAMS = {
     "door",
     "device_use",
     "app_usage",
+    "tv_use",
+    "tv_app",
+    "tv_title",
     "location",
     "place",
 }
@@ -68,9 +71,19 @@ def normalize(
     records: list[RawRecord],
     window_start: datetime,
     window_end: datetime,
+    *,
+    now: datetime | None = None,
 ) -> NormalizedRecords:
     """Split raw records into numeric samples and categorical state intervals."""
     normalized = NormalizedRecords(raw_records=list(records))
+
+    # A state that has not changed yet is open, and is closed at the end of the
+    # window. On a day still in progress that end is in the future, which would
+    # report a television switched on an hour ago as on until midnight — a
+    # measurement of the clock rather than of the room. Open states are closed
+    # at the present instead, and only when the present falls inside the window,
+    # so a finished day is normalized exactly as before.
+    horizon = min(window_end, now or datetime.now(window_end.tzinfo))
 
     by_stream_entity: dict[tuple[str, str | None], list[RawRecord]] = {}
     for record in records:
@@ -89,10 +102,10 @@ def normalize(
         elif stream in CONTINUOUS_STREAMS:
             normalized.samples.extend(_to_samples(group, stream))
             normalized.unavailable.extend(
-                _unavailable_periods(group, stream, window_end)
+                _unavailable_periods(group, stream, horizon)
             )
         elif stream in STATE_STREAMS:
-            states, warnings = _to_states(group, stream, window_end)
+            states, warnings = _to_states(group, stream, horizon)
             normalized.states.extend(states)
             normalized.warnings.extend(warnings)
         # Interval-shaped streams (sleep, activity) stay raw: the feature

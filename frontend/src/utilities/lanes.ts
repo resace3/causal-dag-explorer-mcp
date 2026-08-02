@@ -52,6 +52,7 @@ export const LANE_HEIGHTS: Record<string, number> = {
   computer_use: 104,
   phone_use: 92,
   tiktok: 84,
+  tv: 92,
   location: 96,
 };
 
@@ -89,6 +90,10 @@ export const MAJOR_CATEGORIES = new Set([
   // Screen-on stretches and ordinary app spells are deliberately *not* here —
   // a phone produces dozens of both, which is a smear rather than a landmark.
   'tiktok',
+  // What was on television, by the same test: an evening holds two or three
+  // programmes, not forty. The on/off band around them is left out, exactly as
+  // the phone's screen-on band is.
+  'tv_playing',
 ]);
 
 export const GRID_LINE = '#e6ebf2';

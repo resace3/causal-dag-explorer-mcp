@@ -26,6 +26,7 @@ from .rules import (
     sleep,
     temperature,
     tiktok,
+    tv,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,9 @@ RULES = (
     # it is a subset of, so the whole and the part read as one block.
     ("phone_use", phone_use.build_lane),
     ("tiktok", tiktok.build_lane),
+    # The third screen, kept with the other two. It is last of the three
+    # because it is the one the day is least often spent in front of.
+    ("tv", tv.build_lane),
     ("location", location.build_lane),
 )
 
@@ -60,6 +64,7 @@ FALLBACK_LANE_META = {
     "computer_use": ("Computer Use", "Time at this machine, and in what", "amber"),
     "phone_use": ("Phone Use", "Screen-on stretches, and what was open", "fuchsia"),
     "tiktok": ("TikTok", "Spells in the app, on the phone", "rose"),
+    "tv": ("TV", "When the TV was on, and what was playing", "purple"),
     "location": ("Phone Location", "Zone and place name", "indigo"),
 }
 

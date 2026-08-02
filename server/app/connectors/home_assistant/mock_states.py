@@ -309,6 +309,87 @@ def _app_usage_series(
     return rows
 
 
+def _tv_windows(
+    start: datetime,
+    end: datetime,
+    tz: ZoneInfo,
+    plans: dict[date, DayPlan],
+    rng: random.Random,
+) -> list[tuple[datetime, datetime]]:
+    """Evening sittings, occasionally an afternoon one."""
+    windows: list[tuple[datetime, datetime]] = []
+    for plan in plans.values():
+        evening = datetime.combine(
+            plan.day, time(rng.choice((19, 20)), rng.randrange(0, 50)), tzinfo=tz
+        )
+        windows.append((evening, evening + timedelta(minutes=rng.randint(55, 165))))
+        if rng.random() < 0.35:
+            afternoon = datetime.combine(
+                plan.day, time(14, rng.randrange(0, 50)), tzinfo=tz
+            )
+            windows.append((afternoon, afternoon + timedelta(minutes=rng.randint(25, 70))))
+    return sorted(
+        (a, b) for a, b in windows if b > start and a < end and not plans[a.date()].asleep_at(a)
+    )
+
+
+#: What the mock set is showing. Titles, and the app each one streams from —
+#: two sensors, because a title is high-cardinality and an app is not.
+MOCK_PROGRAMMES = (
+    ("King of the Hill", "Disney+"),
+    ("The Great British Bake Off", "Netflix"),
+    ("Planet Earth III", "BBC iPlayer"),
+    ("Taskmaster", "YouTube"),
+    ("Columbo", "Prime Video"),
+)
+
+
+def _tv_media_series(
+    title_entity: str | None,
+    app_entity: str | None,
+    start: datetime,
+    end: datetime,
+    windows: list[tuple[datetime, datetime]],
+    rng: random.Random,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Title and app states, changing only while the set was on.
+
+    Both values deliberately persist after a window closes, all the way to the
+    next sitting — which is exactly what a media-title sensor does, and why
+    rules/tv.py clips every run against the on-signal. A mock that tidily blanked
+    itself when the television went off would never exercise the case that
+    matters.
+    """
+    first = MOCK_PROGRAMMES[0]
+    titles = [_state(title_entity, first[0], start, {"friendly_name": _friendly_name(title_entity)})] if title_entity else []
+    apps = [_state(app_entity, first[1], start, {"friendly_name": _friendly_name(app_entity)})] if app_entity else []
+
+    for window_start, window_end in windows:
+        begin = max(window_start, start)
+        finish = min(window_end, end)
+        if begin >= finish:
+            continue
+        # An episode or two per sitting, plus the odd very short one that falls
+        # under the naming threshold and is meant to.
+        count = rng.randint(1, 3)
+        step = (finish - begin) / count
+        for index in range(count):
+            title, app = MOCK_PROGRAMMES[rng.randrange(len(MOCK_PROGRAMMES))]
+            moment = begin + step * index
+            if title_entity:
+                titles.append(
+                    _state(title_entity, title, moment, {"friendly_name": _friendly_name(title_entity)})
+                )
+            if app_entity:
+                apps.append(
+                    _state(app_entity, app, moment, {"friendly_name": _friendly_name(app_entity)})
+                )
+
+    titles.sort(key=lambda row: row["last_changed"])
+    apps.sort(key=lambda row: row["last_changed"])
+    return titles, apps
+
+
 def _step_counter(
     entity_id: str,
     start: datetime,
@@ -452,6 +533,21 @@ def generate_history(
     # where apps were open while the screen was off.
     screen_windows = _device_use_windows(start, end, tz, plans, random.Random(seed * 7919 + 13))
 
+    # The same reasoning for the television, one step further: its three sensors
+    # describe one set, so the on-windows *and* the programme choices are made
+    # once. Generated per-entity they would disagree, and the mock would show
+    # Columbo streaming on Netflix while the set was off.
+    tv_rng = random.Random(seed * 6151 + 29)
+    tv_windows = _tv_windows(start, end, tz, plans, tv_rng)
+    tv_titles, tv_apps = _tv_media_series(
+        next(iter(entities.tv_title), None),
+        next(iter(entities.tv_app), None),
+        start,
+        end,
+        tv_windows,
+        tv_rng,
+    )
+
     for index, entity_id in enumerate(entities.all_entity_ids()):
         rng = random.Random(seed * 977 + index * 31 + hash(entity_id) % 10_000)
         domain = entities.domain_for(entity_id)
@@ -502,6 +598,12 @@ def generate_history(
             rows = _binary_series(entity_id, start, end, "connectivity", screen_windows)
         elif domain == "app_usage":
             rows = _app_usage_series(entity_id, start, end, tz, screen_windows, rng)
+        elif domain == "tv_use":
+            rows = _binary_series(entity_id, start, end, "running", tv_windows)
+        elif domain == "tv_title":
+            rows = [row for row in tv_titles if row["entity_id"] == entity_id]
+        elif domain == "tv_app":
+            rows = [row for row in tv_apps if row["entity_id"] == entity_id]
         elif domain == "steps":
             rows = _step_counter(entity_id, start, end, tz, plans, rng)
         elif domain == "resting_heart_rate":

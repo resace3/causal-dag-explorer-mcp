@@ -170,6 +170,15 @@ VARIABLES: dict[str, Variable] = {
             unit="min",
         ),
         Variable(
+            "tv_use",
+            "TV use",
+            "Stretches with the television on. Powered on rather than watched: "
+            "a paused episode and an empty room both count, so this measures "
+            "opportunity to watch rather than attention paid.",
+            lane="tv",
+            unit="min",
+        ),
+        Variable(
             "computer_use",
             "Computer use",
             "Stretches at this machine, from the idle and focus watchers.",
@@ -305,6 +314,24 @@ EDGES: list[CausalEdge] = [
         "light_evening",
         "A lit screen held close contributes to evening light exposure.",
         "plausible",
+    ),
+    # The third screen gets the same pair, at a weaker strength for the light
+    # claim than the two held at arm's length: a television is metres away and
+    # off-axis, and the illuminance at the eye falls off accordingly. The
+    # bedtime claim is the stronger of the two here — an episode that autoplays
+    # into the next one is the mechanism, not the brightness.
+    CausalEdge(
+        "tv_use",
+        "sleep_onset",
+        "An episode running into the next one delays going to bed.",
+        "plausible",
+    ),
+    CausalEdge(
+        "tv_use",
+        "light_evening",
+        "A lit screen across the room adds to evening light, though less than "
+        "one held at arm's length.",
+        "speculative",
     ),
     # Sleep structure
     CausalEdge(

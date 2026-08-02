@@ -729,6 +729,42 @@ under a TikTok heading.
 No application is labelled social, productive or a distraction anywhere in
 this app. The row says how long, and when.
 
+### The TV row
+
+**TV** is the third screen, and it has the same two tiers for the same reasons:
+
+* **On-stretches**, from `entities.tv_use` — a sensor that is on while the set
+  is. Off-stretches shorter than `feature_engineering.tv.merge_within_minutes`
+  do not end a sitting, so switching off to answer the door is not two evenings.
+* **What was playing**, from `entities.tv_title`, with `entities.tv_app`
+  naming the service it streamed from.
+
+The two tiers make **different claims**, and the row is built so one cannot
+pass for the other. The pale band underneath says the television was *powered
+on* — a paused episode, an idle menu and a set left running in an empty room
+all satisfy it equally. Only the solid bars on top say something was reported
+playing. The band carries no caption for this reason, the summary line reads
+"with the TV on" rather than "watching", and the causal variable is called
+`tv_use` and describes itself as opportunity to watch rather than attention
+paid. If the stricter claim is what you want, narrow the sensor rather than the
+wording: point `tv_use` at a template that is on only when the media player is
+`playing`.
+
+A media-title sensor holds its last value after playback stops, exactly like
+the phone's last-used-app sensor, so `tv_title` is clipped to the on-windows
+and is **withheld entirely** without a `tv_use` sensor. That clipping lives in
+`rules/spells.py` and is shared by all three rows — the phone, TikTok and the
+television — rather than copied per row, since it is precisely the kind of
+subtlety that rots when it exists in three places.
+
+#### Recording it, on a Home Assistant instance that has none of this
+
+Media players are usually *not* worth putting on the recorder allowlist: they
+write a row every time the playback position ticks. The cheaper shape is to
+derive small entities from the media player and record those instead — a
+template `binary_sensor` for on/off, and template sensors for the title and the
+app. That is what the example config assumes.
+
 ---
 
 ## Connecting ActivityWatch
@@ -1214,6 +1250,9 @@ already installs, so there is no new image dependency.
 | **Phone screen sessions and app spells** | `server/app/feature_engineering/rules/phone_use.py` |
 | What a package name is called on screen | `server/app/feature_engineering/rules/phone_use.py::APP_NAMES` |
 | **Which app the TikTok row follows** | `config.yaml` → `feature_engineering.tiktok.packages` (and the row's name in `rules/tiktok.py`) |
+| **TV sittings and programmes** | `server/app/feature_engineering/rules/tv.py` |
+| What counts as the TV being "on" | `config.yaml` → `home_assistant.entities.tv_use` (narrow the sensor, not the label) |
+| Clipping a held-over sensor to an on-signal | `server/app/feature_engineering/rules/spells.py` — shared by the phone, TikTok and TV rows |
 | How much of a window or tab is kept | `config.yaml` → `activitywatch.detail` |
 | Lane order and failure handling | `server/app/feature_engineering/pipeline.py` |
 | Config schema for a new rule | `server/app/config/schema.py` |

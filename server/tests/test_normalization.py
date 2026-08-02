@@ -58,6 +58,34 @@ def test_state_streams_become_closed_intervals(new_york):
     assert states[-1].end_time == end
 
 
+def test_an_open_state_on_a_day_in_progress_stops_at_now(new_york):
+    """A television switched on an hour ago has been on for an hour.
+
+    The last state of a stream is open — nothing has changed it yet — and is
+    closed at the end of the window. On a day still running that end is hours
+    into the future, so without this the row would measure the clock instead of
+    the room.
+    """
+    start = datetime(2025, 6, 10, tzinfo=new_york)
+    end = start + timedelta(days=1)
+    now = start + timedelta(hours=18)
+    records = [_record("tv_use", start + timedelta(hours=17), "on")]
+
+    states = normalize(records, start, end, now=now).states_for("tv_use")
+    assert states[-1].end_time == now
+    assert (states[-1].end_time - states[-1].start_time) == timedelta(hours=1)
+
+
+def test_a_finished_day_is_unaffected_by_the_present(new_york):
+    """`now` past the window must change nothing, or every stored day shifts."""
+    start = datetime(2025, 6, 10, tzinfo=new_york)
+    end = start + timedelta(days=1)
+    records = [_record("tv_use", start + timedelta(hours=17), "on")]
+
+    later = normalize(records, start, end, now=end + timedelta(days=400))
+    assert later.states_for("tv_use")[-1].end_time == end
+
+
 def test_unavailable_state_is_marked_and_warned(new_york):
     start = datetime(2025, 6, 10, tzinfo=new_york)
     end = start + timedelta(days=1)

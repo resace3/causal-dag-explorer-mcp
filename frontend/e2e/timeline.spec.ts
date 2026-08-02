@@ -619,6 +619,33 @@ test.describe('Yesterday timeline', () => {
     expect(dagRows.indexOf('tiktok')).toBe(dagRows.indexOf('phone_use') + 1);
   });
 
+  test('the TV row says the set was on without claiming it was watched', async ({
+    page,
+  }) => {
+    await waitForTimeline(page);
+
+    const rows = await page
+      .locator('[data-testid^="lane-label-"]')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute('data-testid')!.slice('lane-label-'.length)),
+      );
+    test.skip(!rows.includes('tv'), 'this day recorded no television use');
+
+    const plot = page.getByTestId('lane-plot-tv');
+    await expect(plot).toBeVisible();
+    // "On" is the only claim the power sensor supports. A summary that said
+    // "watching" would be the row overstating what it measured.
+    await expect(plot.getByText(/with the TV on/)).toBeVisible();
+    await expect(plot.getByText(/watching/)).toHaveCount(0);
+
+    // The details panel has to carry the same caveat, since that is where
+    // someone goes to find out what the bar actually means.
+    await plot.locator('.tl-mark').first().click();
+    await expect(
+      page.getByText(/Powered on is not the same as watched/),
+    ).toBeVisible();
+  });
+
   test('opens the details panel for an event and closes it again', async ({ page }) => {
     await waitForTimeline(page);
 

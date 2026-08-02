@@ -21,6 +21,8 @@ function renderer(lane: Lane): (props: LaneRenderProps) => JSX.Element {
   if (lane.id === 'computer_use') return ComputerUseLane;
   // The same idea with two tiers: screen on, and which app was in front.
   if (lane.id === 'phone_use') return PhoneUseLane;
+  // And again for the third screen: set on, and what was playing.
+  if (lane.id === 'tv') return TvLane;
   // Activity keeps named sessions in front of a step-rate context line.
   if (lane.id === 'activity') return ActivityLane;
   if (lane.series.length > 0) return ContinuousLane;

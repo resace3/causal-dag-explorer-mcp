@@ -87,6 +87,29 @@ class HomeAssistantEntities(StrictModel):
     ever read together with a `device_use` sensor — see `PhoneAppRule`.
     """
 
+    tv_use: list[str] = Field(default_factory=list)
+    """Binary sensors that are on while the television is on.
+
+    "On" here is the television being powered on, which is not the same claim
+    as something being watched: a paused episode and a menu left open both read
+    as on. What was actually playing is the `tv_title` tier below.
+    """
+
+    tv_app: list[str] = Field(default_factory=list)
+    """Sensors naming the app the television is showing (`Disney+`, `YouTube`).
+
+    Low cardinality, so it reads as a handful of bands over a day rather than a
+    caption per programme.
+    """
+
+    tv_title: list[str] = Field(default_factory=list)
+    """Sensors naming what is playing — the episode or film title.
+
+    Like the phone's last-used-app sensor, a media title holds its last value
+    when playback stops, so it is only ever read alongside a `tv_use` sensor
+    and clipped to it. See `TvRule`.
+    """
+
     steps: list[str] = Field(default_factory=list)
     """Cumulative daily step counters (they reset to zero at midnight)."""
 
@@ -480,6 +503,41 @@ class TrackedAppRule(StrictModel):
     merge_within_minutes: float = 2.0
 
 
+class TvRule(StrictModel):
+    """The television row: on-stretches, and what was playing inside them.
+
+    The same two-tier shape as the phone, and the same trap underneath it. A
+    media-title sensor keeps reporting the last thing it saw after playback
+    stops, so an unclipped run reaches from the end of the evening to whenever
+    the television is next switched on. Every spell is intersected with the
+    on-signal before it is drawn, which makes `tv_use` a hard requirement for
+    the title tier rather than a refinement.
+
+    The two tiers make different claims and the row keeps them apart. The band
+    says the television was *on*, which a paused episode and an idle home
+    screen both satisfy. Only the spells inside it say something was playing.
+    """
+
+    rule_version: str = "1.0.0"
+
+    min_session_minutes: float = 5.0
+    """Shortest on-stretch worth drawing. A television woken by the remote and
+    switched straight off is not an evening in front of it."""
+
+    merge_within_minutes: float = 10.0
+    """Off-stretches shorter than this do not end a session. A set turned off
+    while someone answers the door is one sitting, not two."""
+
+    min_programme_minutes: float = 4.0
+    """Shortest spell on one title worth naming. Below this the time is still
+    inside the on-stretch above it, so nothing goes missing — it is the caption
+    that is withheld, not the minutes."""
+
+    programme_merge_within_minutes: float = 3.0
+    """Runs of the same title separated by less than this are one spell, which
+    is what an ad break or a few seconds of buffering looks like."""
+
+
 class ComputerUseRule(StrictModel):
     """Turns per-second focus events into readable sessions.
 
@@ -530,6 +588,7 @@ class FeatureEngineeringConfig(StrictModel):
     device_use: DeviceUseRule = Field(default_factory=DeviceUseRule)
     phone_app: PhoneAppRule = Field(default_factory=PhoneAppRule)
     tiktok: TrackedAppRule = Field(default_factory=TrackedAppRule)
+    tv: TvRule = Field(default_factory=TvRule)
     computer_use: ComputerUseRule = Field(default_factory=ComputerUseRule)
     data_gap: DataGapRule = Field(default_factory=DataGapRule)
 

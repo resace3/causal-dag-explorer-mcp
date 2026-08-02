@@ -28,6 +28,7 @@ from ...models.raw import NormalizedState
 from ...models.timeline import Lane, TimelineEvent
 from ..context import RuleContext, sort_events
 from ..provenance import build_provenance
+from .spells import clipped_spells, on_windows
 
 RULE_SESSION = "phone_use.screen_session"
 RULE_APP = "phone_use.app_session"
@@ -162,20 +163,6 @@ def _screen_states(context: RuleContext) -> list[NormalizedState]:
     ]
 
 
-def screen_windows(states: list[NormalizedState]) -> list[tuple[datetime, datetime]]:
-    """The raw screen-on spans, unmerged.
-
-    The session tier bridges short locks so the drawn bars read as sessions;
-    clipping an application spell has to use the unbridged windows instead, or
-    a five-minute pocket gap would silently become five minutes in an app.
-    """
-    return sorted(
-        (state.start_time, state.end_time)
-        for state in states
-        if state.end_time > state.start_time
-    )
-
-
 def _sessions(
     context: RuleContext, states: list[NormalizedState]
 ) -> tuple[list[TimelineEvent], str | None]:
@@ -259,73 +246,20 @@ def _sessions(
 # --------------------------------------------------------------------------
 
 
-def app_spells(
-    states: list[NormalizedState],
-    windows: list[tuple[datetime, datetime]],
-    merge_within: timedelta,
-    *,
-    packages: set[str] | None = None,
-) -> list[tuple[str, datetime, datetime, list[str], NormalizedState]]:
-    """Runs of one application, clipped to the screen-on windows.
-
-    Returns `(package, start, end, raw_record_ids, sample)` per spell. `packages`
-    keeps only the named ones, which is how the TikTok lane reuses this.
-
-    Runs are built from every application first and filtered afterwards, never
-    the other way round. Filtering first would let two spells either side of a
-    glance at the home screen merge across it, quietly relabelling that glance —
-    a row that exists to say how long was spent in one app must not round up.
-    """
-    if not states or not windows:
-        return []
-
-    ordered = sorted(states, key=lambda item: item.start_time)
-    runs: list[tuple[str, datetime, datetime, list[str]]] = []
-    for state in ordered:
-        package = state.state
-        if not package or package.startswith("__"):
-            continue  # unavailable, or a hole the normalizer marked
-        if runs and runs[-1][0] == package and state.start_time - runs[-1][2] <= merge_within:
-            value, start, previous_end, ids = runs[-1]
-            runs[-1] = (
-                value,
-                start,
-                max(previous_end, state.end_time),
-                [*ids, *state.raw_record_ids],
-            )
-            continue
-        runs.append((package, state.start_time, state.end_time, list(state.raw_record_ids)))
-
-    by_start = {state.start_time: state for state in ordered}
-
-    spells: list[tuple[str, datetime, datetime, list[str], NormalizedState]] = []
-    for package, run_start, run_end, ids in runs:
-        if packages is not None and package not in packages:
-            continue
-        sample = by_start.get(run_start, ordered[0])
-        for window_start, window_end in windows:
-            start = max(run_start, window_start)
-            end = min(run_end, window_end)
-            if end > start:
-                spells.append((package, start, end, ids, sample))
-    spells.sort(key=lambda spell: spell[1])
-    return spells
-
-
 def _app_events(
     context: RuleContext,
     states: list[NormalizedState],
     screen: list[NormalizedState],
 ) -> tuple[list[TimelineEvent], str | None]:
     rule = context.config.phone_app
-    windows = screen_windows(screen)
+    windows = on_windows(screen)
     if not states or not windows:
         return [], None
 
     minimum = timedelta(minutes=rule.min_app_minutes)
     events: list[TimelineEvent] = []
 
-    for package, span_start, span_end, record_ids, sample in app_spells(
+    for package, span_start, span_end, record_ids, sample in clipped_spells(
         states, windows, timedelta(minutes=rule.merge_within_minutes)
     ):
         if span_end - span_start < minimum:

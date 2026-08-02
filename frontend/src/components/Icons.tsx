@@ -386,6 +386,16 @@ export function ShortVideoIcon({ size = 18, className, strokeWidth }: IconProps)
   );
 }
 
+/** A television: a wide screen on legs, distinct from the monitor's stand. */
+export function TelevisionIcon({ size = 18, className, strokeWidth }: IconProps) {
+  return (
+    <svg {...base(size, className, strokeWidth)}>
+      <rect x="2.4" y="6.6" width="19.2" height="12.2" rx="2" />
+      <path d="M8.4 3.4L12 6.6l3.6-3.2" />
+    </svg>
+  );
+}
+
 const LANE_ICONS: Record<string, (props: IconProps) => JSX.Element> = {
   activity: ActivityIcon,
   heart_rate: HeartIcon,
@@ -398,6 +408,7 @@ const LANE_ICONS: Record<string, (props: IconProps) => JSX.Element> = {
   computer_use: MonitorIcon,
   phone_use: PhoneIcon,
   tiktok: ShortVideoIcon,
+  tv: TelevisionIcon,
   location: PlaceIcon,
 };
 
@@ -427,6 +438,7 @@ const VARIABLE_ICONS: Record<string, (props: IconProps) => JSX.Element> = {
   light_evening: SunsetIcon,
   device_use: PhoneIcon,
   tiktok: ShortVideoIcon,
+  tv_use: TelevisionIcon,
   time_away: DoorExitIcon,
   location: PlaceIcon,
   day_of_week: CalendarIcon,

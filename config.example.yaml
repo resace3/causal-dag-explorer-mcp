@@ -79,6 +79,24 @@ home_assistant:
     app_usage:
       - sensor.phone_last_used_app
 
+    # A television. `tv_use` is a sensor that is on while the set is on — a
+    # template binary_sensor over a media_player's state works well, and is far
+    # cheaper to record than the media_player itself, which writes a row every
+    # time the playback position ticks.
+    #
+    # "On" is a weaker claim than "being watched": a paused episode and a menu
+    # left open both satisfy it. What was actually playing is `tv_title`, which
+    # holds its last value after playback stops and is therefore only ever read
+    # alongside `tv_use` and clipped to it.
+    tv_use:
+      - binary_sensor.tv_in_use
+
+    tv_app:
+      - sensor.tv_current_app
+
+    tv_title:
+      - sensor.tv_now_playing
+
     # Cumulative daily step counters. These reset to zero at midnight, and the
     # reset is detected rather than drawn as a huge negative step.
     steps:
@@ -245,6 +263,17 @@ feature_engineering:
     min_minutes: 0.5
     merge_within_minutes: 2
 
+  # The television, in the same two tiers as the phone: stretches with the set
+  # on, and what was playing inside them. Sittings run longer than phone
+  # sessions, so the thresholds are correspondingly coarser — and an off-stretch
+  # short enough to be someone answering the door does not end the evening.
+  tv:
+    rule_version: "1.0.0"
+    min_session_minutes: 5
+    merge_within_minutes: 10
+    min_programme_minutes: 4
+    programme_merge_within_minutes: 3
+
   # ActivityWatch writes an event every time the focused window changes, so a
   # working hour is hundreds of events. These decide what counts as one stretch
   # at the machine, and what counts as one spell in an application. Time below
@@ -297,6 +326,8 @@ lanes:
   - id: phone_use
     visible: true
   - id: tiktok
+    visible: true
+  - id: tv
     visible: true
   - id: location
     visible: true

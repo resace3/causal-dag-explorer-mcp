@@ -21,13 +21,8 @@ from datetime import timedelta
 from ...models.timeline import Lane, TimelineEvent
 from ..context import RuleContext, sort_events
 from ..provenance import build_provenance
-from .phone_use import (
-    STREAM_APP,
-    _screen_states,
-    app_label,
-    app_spells,
-    screen_windows,
-)
+from .phone_use import STREAM_APP, _screen_states, app_label
+from .spells import clipped_spells, on_windows
 
 RULE_TRACKED_APP = "tiktok.app_session"
 
@@ -46,7 +41,7 @@ def build_lane(context: RuleContext) -> Lane:
     rule = context.config.tiktok
     app_states = context.normalized.states_for(STREAM_APP)
     screen = _screen_states(context)
-    windows = screen_windows(screen)
+    windows = on_windows(screen)
 
     if not app_states:
         lane.unavailable_reason = _nothing_reason(context)
@@ -66,11 +61,11 @@ def build_lane(context: RuleContext) -> Lane:
     packages = {package for package in rule.packages if package}
     events: list[TimelineEvent] = []
 
-    for package, span_start, span_end, record_ids, sample in app_spells(
+    for package, span_start, span_end, record_ids, sample in clipped_spells(
         app_states,
         windows,
         timedelta(minutes=rule.merge_within_minutes),
-        packages=packages,
+        values=packages,
     ):
         if span_end - span_start < minimum:
             continue
