@@ -50,19 +50,40 @@ class PhoneUsageClient:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
+    def _unreachable(self, detail: str) -> PhoneUsageUnreachableError:
+        return PhoneUsageUnreachableError(
+            f"Could not reach the phone-usage add-on at {self.base_url} ({detail}). "
+            "It publishes this port on the Home Assistant host itself, so it is "
+            "reachable only from that network — a laptop on mobile data or another "
+            "Wi-Fi cannot see it, and the Nabu Casa remote URL does not proxy it. "
+            "Check PHONE_USAGE_URL, and that you are on the same network as Home "
+            "Assistant."
+        )
+
+    def _timeouts(self) -> httpx.Timeout:
+        """Give up on *connecting* quickly, but allow a slow answer.
+
+        A day of segments is a large reply and deserves the full budget. Failing
+        to reach the host at all does not: off the home network every sync would
+        otherwise stall for the whole timeout before saying so, and syncs run on
+        a timer.
+        """
+        return httpx.Timeout(self._timeout, connect=min(3.0, self._timeout))
+
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         url = f"{self.base_url}{path}"
         try:
             async with httpx.AsyncClient(
-                timeout=self._timeout, transport=self._transport
+                timeout=self._timeouts(), transport=self._transport
             ) as client:
                 response = await client.get(url, params=params, headers=self._headers())
+        except httpx.TimeoutException as exc:
+            raise self._unreachable(f"no response within {self._timeout:.0f}s") from exc
         except httpx.HTTPError as exc:
-            raise PhoneUsageUnreachableError(
-                f"Could not reach the phone-usage add-on at {self.base_url} ({exc}). "
-                "It is served from the Home Assistant host, so this only works on a "
-                "network that can see it."
-            ) from exc
+            # The type name, never str(exc): httpx.ConnectError stringifies to
+            # nothing at all, which rendered as an empty pair of brackets and
+            # read like the message itself was broken.
+            raise self._unreachable(type(exc).__name__) from exc
 
         if response.status_code in (401, 403):
             raise PhoneUsageError(

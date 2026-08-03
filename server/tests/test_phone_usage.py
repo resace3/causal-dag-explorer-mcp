@@ -335,6 +335,49 @@ async def test_an_unreachable_addon_does_not_claim_the_phone_was_idle():
         await _client(handler).timeline(date(2025, 6, 10))
 
 
+async def test_the_unreachable_message_names_the_fault_even_when_httpx_is_silent():
+    """httpx.ConnectError stringifies to nothing, which rendered as "()".
+
+    An empty pair of brackets in the middle of an error reads as the message
+    being broken rather than the network, so the type name is used instead.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("")
+
+    with pytest.raises(PhoneUsageError) as caught:
+        await _client(handler).status()
+
+    message = str(caught.value)
+    assert "()" not in message
+    assert "ConnectError" in message
+    # And it says why an otherwise-working setup cannot see it.
+    assert "same network" in message
+
+
+async def test_connecting_gives_up_long_before_reading_does():
+    """Off the home network every sync would otherwise stall for the full
+    timeout, and syncs run on a five-minute timer."""
+    client = PhoneUsageClient("http://addon:8099", "tok", timeout=20.0)
+    timeouts = client._timeouts()
+
+    assert timeouts.connect == 3.0
+    assert timeouts.read == 20.0
+
+
+async def test_a_short_overall_timeout_is_not_lengthened_by_the_connect_floor():
+    client = PhoneUsageClient("http://addon:8099", "tok", timeout=1.0)
+
+    assert client._timeouts().connect == 1.0
+
+
+async def test_a_timeout_says_how_long_it_waited():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow")
+
+    with pytest.raises(PhoneUsageError, match="no response within"):
+        await _client(handler).status()
+
+
 async def test_the_connector_drops_segments_outside_the_window(new_york, tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/timeline":

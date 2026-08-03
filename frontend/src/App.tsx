@@ -17,10 +17,34 @@ import { Timeline } from './timeline/Timeline';
 import type { Lane, Selection } from './types/timeline';
 import { selectionKey } from './types/timeline';
 
+/**
+ * How often the day in progress goes back to its sources.
+ *
+ * Only ever applied to today. A sync overwrites the stored day, so putting a
+ * finished day on a repeating one would keep replacing a complete record with
+ * whatever the sources answered at that moment — and a source that happened to
+ * be unreachable would degrade it permanently. Today is the day that is
+ * supposed to keep changing.
+ */
+const AUTO_SYNC_MS = 5 * 60_000;
+
 export function App() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const { timeline, state, error, refreshing, refresh, reload } = useTimeline(selectedDate);
+  // Zero until the backend has said which day today is. `useDays` needs the
+  // timeline to know that, and the timeline comes from the hook below, so the
+  // answer necessarily arrives a render late — which costs nothing, because
+  // the first load has already happened by then.
+  const [autoSyncMs, setAutoSyncMs] = useState(0);
+  const { timeline, state, error, refreshing, refresh, reload } = useTimeline(
+    selectedDate,
+    60_000,
+    autoSyncMs,
+  );
   const { index: dayIndex, today, yesterday } = useDays(timeline?.generatedAt);
+
+  useEffect(() => {
+    setAutoSyncMs(selectedDate !== null && selectedDate === today ? AUTO_SYNC_MS : 0);
+  }, [selectedDate, today]);
   const { report: sources, state: sourcesState } = useDataSources(timeline?.generatedAt);
 
   // The page opens on the day in progress. The backend decides which day that
