@@ -55,7 +55,18 @@ def build_lane(context: RuleContext) -> Lane:
         for record in context.normalized.raw_for(STREAM_SEGMENT)
         if record.end_timestamp is not None
     ]
-    if not segments:
+    # Scoped to the day, not to the fetch window. The window opens fourteen
+    # hours early, so yesterday evening's segments are always in hand — and
+    # judging "did anything happen?" by those would tell someone whose phone
+    # stopped syncing that their thresholds were too strict, sending them to
+    # config.yaml instead of to the collector.
+    in_day = [
+        record
+        for record in segments
+        if record.end_timestamp > context.window.start
+        and record.timestamp < context.window.end
+    ]
+    if not in_day:
         lane.unavailable_reason = _nothing_reason(context)
         return lane
 

@@ -259,6 +259,30 @@ def test_the_day_counts_ride_on_the_first_pickup_only(new_york, sync_service):
     assert "dayCounts" not in pickups[1].metadata
 
 
+def test_yesterdays_segments_do_not_make_today_look_like_a_threshold_problem(
+    new_york, sync_service
+):
+    """The fetch window opens fourteen hours early, so last night is always in
+    hand. A phone that stopped syncing must not be reported as a phone whose
+    pickups were all too short — that sends someone to config.yaml when the
+    collector is what needs looking at."""
+    records = [segment(new_york, TIKTOK, -5, -4)]  # 7pm the previous evening
+    lane = phone_use_custom.build_lane(_context(records, new_york, sync_service))
+
+    assert not lane.available
+    assert "no foreground activity" in lane.unavailable_reason
+    assert "no stretch reached" not in lane.unavailable_reason
+
+
+def test_a_pickup_crossing_midnight_still_draws(new_york, sync_service):
+    """Scoping the emptiness check to the day must not discard a real overlap."""
+    records = [segment(new_york, TIKTOK, -0.2, 0.3)]  # 23:48 to 00:18
+    lane = phone_use_custom.build_lane(_context(records, new_york, sync_service))
+
+    assert lane.available
+    assert _of(lane, "phone_custom_on")[0].continues_before is True
+
+
 def test_an_empty_day_says_the_collector_may_simply_not_reach_back(
     new_york, sync_service
 ):
