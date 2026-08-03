@@ -127,7 +127,7 @@ def _pickups(
     spans = _merge(segments, merge_within)
     events: list[TimelineEvent] = []
 
-    for index, (span_start, span_end, ids) in enumerate(spans):
+    for index, (span_start, span_end, members) in enumerate(spans):
         clipped = context.clip_to_day(span_start, span_end)
         if clipped is None:
             continue
@@ -136,15 +136,21 @@ def _pickups(
             continue
 
         minutes = (end - start).total_seconds() / 60
+        foreground = _foreground_minutes(members, start, end)
+        idle = max(minutes - foreground, 0.0)
         metadata = {
             "durationMinutes": round(minutes, 1),
+            "foregroundMinutes": round(foreground, 1),
+            "bridgedIdleMinutes": round(idle, 1),
             "fullStart": span_start.isoformat(),
             "fullEnd": span_end.isoformat(),
-            "segmentCount": len(ids),
+            "segmentCount": len(members),
             "note": (
-                "A stretch with some app in the foreground, from Android's usage-stats "
-                f"stream, with gaps shorter than {rule.merge_within_minutes:g} minutes "
-                "treated as one pickup. Measured by a different instrument from the "
+                "One pickup, from Android's usage-stats stream, with gaps shorter than "
+                f"{rule.merge_within_minutes:g} minutes bridged rather than ending it. "
+                f"The bar spans {minutes:.0f} minutes; an app was actually in front for "
+                f"{foreground:.0f} of them, and the other {idle:.0f} are bridged gaps "
+                "with the phone down. Measured by a different instrument from the "
                 "Phone Use row above, so the two will not match."
             ),
         }
@@ -185,7 +191,7 @@ def _pickups(
                 provenance=build_provenance(
                     rule=RULE_SESSION,
                     version=rule.rule_version,
-                    raw_record_ids=ids,
+                    raw_record_ids=[record.id for record in members],
                     thresholds={
                         "merge_within_minutes": rule.merge_within_minutes,
                         "min_session_minutes": rule.min_session_minutes,
@@ -194,6 +200,9 @@ def _pickups(
                     notes=[
                         "Foreground segments carry real end times, so nothing is "
                         "clipped against a screen sensor here.",
+                        "The bar is the span of the pickup; foregroundMinutes is the "
+                        "time inside it an app was really in front. Summing the bars "
+                        "counts the bridged gaps too.",
                     ],
                 ),
             )
@@ -299,18 +308,44 @@ def _app_spells(
 
 def _merge(
     records: list[RawRecord], tolerance: timedelta
-) -> list[tuple[datetime, datetime, list[str]]]:
-    spans: list[tuple[datetime, datetime, list[str]]] = []
+) -> list[tuple[datetime, datetime, list[RawRecord]]]:
+    """Spans of use, bridging gaps up to `tolerance`.
+
+    The member records travel with each span rather than just their ids,
+    because the span and the time actually spent in an app are two different
+    numbers once gaps are bridged, and the row reports both.
+    """
+    spans: list[tuple[datetime, datetime, list[RawRecord]]] = []
     for record in sorted(records, key=lambda item: item.timestamp):
         end = record.end_timestamp
         if end is None:
             continue
         if spans and record.timestamp - spans[-1][1] <= tolerance:
-            start, previous_end, ids = spans[-1]
-            spans[-1] = (start, max(previous_end, end), [*ids, record.id])
+            start, previous_end, members = spans[-1]
+            spans[-1] = (start, max(previous_end, end), [*members, record])
             continue
-        spans.append((record.timestamp, end, [record.id]))
+        spans.append((record.timestamp, end, [record]))
     return spans
+
+
+def _foreground_minutes(
+    members: list[RawRecord], start: datetime, end: datetime
+) -> float:
+    """Minutes actually spent with an app in front, inside [start, end).
+
+    Not the span. A bridged gap is a phone in a pocket, and counting it as
+    foreground time would be the row asserting exactly what the segments say
+    did not happen.
+    """
+    total = 0.0
+    for record in members:
+        finish = record.end_timestamp
+        if finish is None:
+            continue
+        overlap = (min(finish, end) - max(record.timestamp, start)).total_seconds()
+        if overlap > 0:
+            total += overlap
+    return total / 60
 
 
 def _duration(minutes: float) -> str:

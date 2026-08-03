@@ -9,11 +9,24 @@ import pytest
 
 from app.config.settings import Settings, reset_settings_cache
 from app.connectors.activitywatch.connector import ActivityWatchConnector
+from app.connectors.phone_usage.connector import PhoneUsageConnector
 from app.connectors.home_assistant.client import HomeAssistantClient
 from app.connectors.home_assistant.connector import HomeAssistantConnector
 from app.connectors.wearables.base import BaseWearableProvider, WearableCapabilities
 from app.connectors.wearables.connector import WearableConnector
 from app.services.sync import SyncService
+
+
+def no_phone_usage(config, settings, tz) -> PhoneUsageConnector:
+    """The phone-usage add-on, switched off, for the same reason as ActivityWatch.
+
+    These tests are about Home Assistant and the wearable failing. Left enabled
+    it would reach for an add-on on the home network, which is present on the
+    developer's machine and absent in CI.
+    """
+    return PhoneUsageConnector(
+        config.phone_usage.model_copy(update={"enabled": False}), settings, tz
+    )
 
 
 def no_activitywatch(config, settings, tz) -> ActivityWatchConnector:
@@ -79,6 +92,7 @@ async def test_home_assistant_offline_still_renders_wearable_lanes(
             home_assistant,
             WearableConnector(MockWearableProvider(new_york, seed=42)),
             no_activitywatch(example_config, settings, new_york),
+            no_phone_usage(example_config, settings, new_york),
         )
 
     monkeypatch.setattr(service, "_connectors", connectors)
@@ -108,6 +122,7 @@ async def test_broken_wearable_provider_is_reported_not_raised(
             home_assistant,
             WearableConnector(_BrokenProvider()),
             no_activitywatch(example_config, service.settings, new_york),
+            no_phone_usage(example_config, service.settings, new_york),
         )
 
     monkeypatch.setattr(service, "_connectors", connectors)
@@ -146,6 +161,7 @@ async def test_a_failing_metric_degrades_only_that_metric(
             home_assistant,
             WearableConnector(_PartialProvider()),
             no_activitywatch(example_config, service.settings, new_york),
+            no_phone_usage(example_config, service.settings, new_york),
         )
 
     monkeypatch.setattr(service, "_connectors", connectors)

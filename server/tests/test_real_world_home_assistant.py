@@ -19,6 +19,7 @@ from app.config.schema import (
 )
 from app.config.settings import Settings
 from app.connectors.activitywatch.connector import ActivityWatchConnector
+from app.connectors.phone_usage.connector import PhoneUsageConnector
 from app.connectors.home_assistant.client import HomeAssistantClient
 from app.connectors.home_assistant.connector import HomeAssistantConnector
 from app.connectors.wearables.home_assistant_provider import HomeAssistantWearableProvider
@@ -379,6 +380,13 @@ async def test_a_person_and_its_device_tracker_do_not_draw_two_blocks(
             # is switched off so it never reaches for a real local server.
             ActivityWatchConnector(
                 example_config.activitywatch.model_copy(update={"enabled": False}),
+                settings,
+                new_york,
+            ),
+            # And the phone-usage add-on, for the same reason: it lives on the
+            # home network, which CI does not have.
+            PhoneUsageConnector(
+                example_config.phone_usage.model_copy(update={"enabled": False}),
                 settings,
                 new_york,
             ),

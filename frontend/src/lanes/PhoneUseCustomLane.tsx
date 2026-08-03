@@ -32,6 +32,25 @@ function minutesOf(event: TimelineEvent): number {
   return typeof value === 'number' ? value : 0;
 }
 
+/**
+ * Time an app was really in front, which is not the bar's width.
+ *
+ * Pickups bridge short gaps, so the bar spans them. Summing bar widths and
+ * calling the result foreground time would count a phone in a pocket, so the
+ * summary uses this and falls back to the span only when a row predates the
+ * distinction.
+ */
+function foregroundOf(event: TimelineEvent): number {
+  const value = event.metadata?.foregroundMinutes;
+  return typeof value === 'number' ? value : minutesOf(event);
+}
+
+function duration(total: number): string {
+  const hours = Math.floor(total / 60);
+  const rest = Math.round(total % 60);
+  return hours ? `${hours}h ${rest}m` : `${rest}m`;
+}
+
 function counts(sessions: TimelineEvent[]): Record<string, unknown> | null {
   for (const event of sessions) {
     const day = event.metadata?.dayCounts;
@@ -41,11 +60,16 @@ function counts(sessions: TimelineEvent[]): Record<string, unknown> | null {
 }
 
 function summarise(sessions: TimelineEvent[], apps: TimelineEvent[]): string {
-  const total = sessions.reduce((sum, event) => sum + minutesOf(event), 0);
-  const hours = Math.floor(total / 60);
-  const rest = Math.round(total % 60);
-  const spent = hours ? `${hours}h ${rest}m` : `${rest}m`;
-  const parts = [`${spent} in the foreground`];
+  const foreground = sessions.reduce((sum, event) => sum + foregroundOf(event), 0);
+  const span = sessions.reduce((sum, event) => sum + minutesOf(event), 0);
+  const parts = [`${duration(foreground)} in the foreground`];
+
+  // The bars bridge gaps, so their total is longer than the time in an app.
+  // Reporting only the smaller number would leave someone measuring the bars
+  // against it and finding they do not add up; both are named instead.
+  if (Math.round(span) > Math.round(foreground)) {
+    parts.push(`${duration(span)} across ${sessions.length} pickups`);
+  }
 
   const day = counts(sessions);
   const unlocks = day?.unlocks;

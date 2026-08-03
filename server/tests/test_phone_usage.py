@@ -168,6 +168,39 @@ def test_adjacent_segments_become_one_pickup(new_york, sync_service):
     assert pickups[0].metadata["segmentCount"] == 2
 
 
+def test_a_bridged_gap_is_not_counted_as_time_in_an_app(new_york, sync_service):
+    """Raising the merge tolerance widens the bar but not the usage.
+
+    Two ten-minute spells either side of a ten-minute gap are one pickup
+    spanning thirty minutes, of which twenty were spent in an app. Reporting
+    thirty as foreground time would assert exactly what the segments deny.
+    """
+    sync_service.config.feature_engineering.phone_use_custom.merge_within_minutes = 15
+    records = [
+        segment(new_york, TIKTOK, 19, 19 + 1 / 6),
+        segment(new_york, CHROME, 19 + 1 / 3, 19.5),
+    ]
+    lane = phone_use_custom.build_lane(_context(records, new_york, sync_service))
+
+    pickups = _of(lane, "phone_custom_on")
+    assert len(pickups) == 1
+    assert pickups[0].metadata["durationMinutes"] == 30.0
+    assert pickups[0].metadata["foregroundMinutes"] == 20.0
+    assert pickups[0].metadata["bridgedIdleMinutes"] == 10.0
+    assert "bridged gaps with the phone down" in pickups[0].metadata["note"]
+
+
+def test_a_gap_past_the_tolerance_still_starts_a_new_pickup(new_york, sync_service):
+    sync_service.config.feature_engineering.phone_use_custom.merge_within_minutes = 15
+    records = [
+        segment(new_york, TIKTOK, 19, 19.1),
+        segment(new_york, TIKTOK, 19.5, 19.6),  # 24 minutes later
+    ]
+    lane = phone_use_custom.build_lane(_context(records, new_york, sync_service))
+
+    assert len(_of(lane, "phone_custom_on")) == 2
+
+
 def test_a_long_gap_starts_a_second_pickup(new_york, sync_service):
     records = [
         segment(new_york, TIKTOK, 9, 9.2),

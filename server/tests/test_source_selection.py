@@ -74,9 +74,16 @@ def test_a_source_added_after_the_choice_joins_it_rather_than_reading_as_switche
     until the user found the switch."""
     repository.set_source_selection(["home_assistant"], known=["home_assistant"])
     selection = sync_service.source_selection()
+    available = [item["id"] for item in sync_service.available_sources()]
+    arrived = [source for source in available if source != "home_assistant"]
 
     assert "activitywatch" in selection
-    assert selection[-1] == "activitywatch", "a new source joins last, not first"
+    # Every source that was not on offer when the choice was made joins after
+    # the one that was, in the order the config declares them. Asserting on one
+    # name by hand made this fail the day a fourth source was added, which is
+    # not what the test is about.
+    assert selection[0] == "home_assistant", "the stored choice keeps its place"
+    assert selection[1:] == arrived, "new sources join last, in config order"
 
 
 def test_a_source_that_was_offered_and_left_out_stays_switched_off(repository, sync_service):

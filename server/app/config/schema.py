@@ -582,8 +582,13 @@ class PhoneUseCustomRule(StrictModel):
     picking a phone up for forty seconds is a real and frequent event."""
 
     merge_within_minutes: float = 3.0
-    """Segments separated by less than this are one pickup. Below it the phone
-    was still in hand between two apps."""
+    """Segments separated by less than this are one pickup.
+
+    Raising it makes the row read as sittings rather than glances, at a price:
+    a bridged gap is inside the bar, so the bar's length stops being time spent
+    in an app. Each pickup therefore carries `foregroundMinutes` alongside its
+    span, and the row's summary quotes the former — a phone in a pocket for
+    twelve minutes must not be counted as twelve minutes of use."""
 
     min_app_minutes: float = 1.0
     """Shortest spell in one application worth naming. The time is still inside
