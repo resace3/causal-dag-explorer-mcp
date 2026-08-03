@@ -729,6 +729,59 @@ under a TikTok heading.
 No application is labelled social, productive or a distraction anywhere in
 this app. The row says how long, and when.
 
+### The Phone Use custom row
+
+A second view of the same phone, from the
+[Phone Usage Collector add-on](https://github.com/resace3/ha-phone-usage-addon)
+running on the Home Assistant host. It holds Android's own usage-stats stream,
+so where the companion-app row has a sensor that reports the last app and holds
+it, this one has real foreground segments with start and end times.
+
+The two rows sit next to each other and **will not agree**, often by several
+times over. A sensor that reports only when its value changes cannot see a
+phone picked up for forty seconds and put down again, so the companion-app row
+reports fewer, longer sessions than the event stream does. Neither row corrects
+the other: they are two instruments with different definitions, and the
+timeline draws both rather than picking a winner.
+
+#### Two numbers about the same app, and only one is a total
+
+This is the trap the row is built around.
+
+| | `/v1/timeline` | `/v1/apps` |
+|---|---|---|
+| gives | segments with real start/end times | per-app minutes for the day |
+| attribution | **package-level** | **task-root** |
+| use it for | *when* | *how much* |
+
+Android credits usage to `taskRootPackage`, so a link opened inside TikTok
+belongs to TikTok — but the public `UsageEvents` API does not expose that field,
+only `dumpsys` does. The event stream is therefore package-level, and replaying
+it to get a per-app total understates in-app-browser-heavy apps severalfold —
+badly enough that an app whose bars add to twenty minutes can have a true daily
+total twice that.
+
+So the bars are drawn from segments, because only segments know *when*, and
+every named spell carries the authoritative daily figure in its details panel
+with a note saying that adding the bars up will not reach it. The two arrive on
+separate raw streams (`phone_segment` and `phone_app_daily`) specifically so a
+rule cannot reach for the wrong one by accident.
+
+#### Setup
+
+The add-on's address and token are credentials, so they go in `.env`:
+
+```bash
+PHONE_USAGE_URL=http://<home-assistant-host>:8099
+PHONE_USAGE_TOKEN=<the add-on's configured token>
+```
+
+Port 8099 is the token-authenticated query API. Port 8098 is the same API behind
+Home Assistant Ingress, which authenticates with a session cookie minted from an
+admin credential — a long-lived access token cannot mint one, because Supervisor
+endpoints refuse it. That is why this reads the host port directly, and why it
+only works from a network that can see the Home Assistant host.
+
 ### The TV row
 
 **TV** is the third screen, and it has the same two tiers for the same reasons:
@@ -1251,6 +1304,8 @@ already installs, so there is no new image dependency.
 | What a package name is called on screen | `server/app/feature_engineering/rules/phone_use.py::APP_NAMES` |
 | **Which app the TikTok row follows** | `config.yaml` → `feature_engineering.tiktok.packages` (and the row's name in `rules/tiktok.py`) |
 | **TV sittings and programmes** | `server/app/feature_engineering/rules/tv.py` |
+| **Phone pickups from the usage-stats add-on** | `server/app/feature_engineering/rules/phone_use_custom.py` |
+| Where the add-on lives, and its token | `.env` → `PHONE_USAGE_URL` / `PHONE_USAGE_TOKEN` |
 | What counts as the TV being "on" | `config.yaml` → `home_assistant.entities.tv_use` (narrow the sensor, not the label) |
 | Clipping a held-over sensor to an on-signal | `server/app/feature_engineering/rules/spells.py` — shared by the phone, TikTok and TV rows |
 | How much of a window or tab is kept | `config.yaml` → `activitywatch.detail` |

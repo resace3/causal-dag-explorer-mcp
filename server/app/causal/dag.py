@@ -454,6 +454,7 @@ OBSERVED_BY_LANE = {
     "computer_use": {"computer_use"},
     "phone_use": {"device_use"},
     "tiktok": {"tiktok"},
+    "phone_use_custom": {"phone_pickups"},
     "tv": {"tv_use"},
     "location": {"location"},
 }

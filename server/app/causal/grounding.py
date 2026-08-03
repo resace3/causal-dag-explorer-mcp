@@ -101,6 +101,9 @@ GROUNDINGS: dict[str, tuple[Grounding, ...]] = {
     "tiktok": (Grounding(lane="tiktok", categories=("tiktok",)),),
     # The on-stretches, not the individual programmes inside them — the same
     # whole-not-part choice the phone makes two lines up.
+    "phone_pickups": (
+        Grounding(lane="phone_use_custom", categories=("phone_custom_on",)),
+    ),
     "tv_use": (Grounding(lane="tv", categories=("tv_on",)),),
     # Stretches at the machine, not the individual application spells: one row
     # per browser tab would bury the graph and says nothing a session does not.

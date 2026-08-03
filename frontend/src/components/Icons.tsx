@@ -386,6 +386,16 @@ export function ShortVideoIcon({ size = 18, className, strokeWidth }: IconProps)
   );
 }
 
+/** A phone with a bar chart on it: usage statistics rather than the device. */
+export function PhoneStatsIcon({ size = 18, className, strokeWidth }: IconProps) {
+  return (
+    <svg {...base(size, className, strokeWidth)}>
+      <rect x="6.6" y="3" width="10.8" height="18" rx="2.4" />
+      <path d="M9.6 15.4v-2.2M12 15.4V9.6M14.4 15.4v-3.6" />
+    </svg>
+  );
+}
+
 /** A television: a wide screen on legs, distinct from the monitor's stand. */
 export function TelevisionIcon({ size = 18, className, strokeWidth }: IconProps) {
   return (
@@ -408,6 +418,7 @@ const LANE_ICONS: Record<string, (props: IconProps) => JSX.Element> = {
   computer_use: MonitorIcon,
   phone_use: PhoneIcon,
   tiktok: ShortVideoIcon,
+  phone_use_custom: PhoneStatsIcon,
   tv: TelevisionIcon,
   location: PlaceIcon,
 };
@@ -438,6 +449,7 @@ const VARIABLE_ICONS: Record<string, (props: IconProps) => JSX.Element> = {
   light_evening: SunsetIcon,
   device_use: PhoneIcon,
   tiktok: ShortVideoIcon,
+  phone_pickups: PhoneStatsIcon,
   tv_use: TelevisionIcon,
   time_away: DoorExitIcon,
   location: PlaceIcon,

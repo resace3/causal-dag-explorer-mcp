@@ -77,6 +77,7 @@ export type AccentToken =
   | 'blue'
   | 'indigo'
   | 'purple'
+  | 'violet'
   | 'orange'
   | 'teal'
   | 'sky'

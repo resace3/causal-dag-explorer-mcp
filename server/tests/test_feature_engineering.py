@@ -32,6 +32,7 @@ async def test_every_lane_is_present_and_ordered(timeline):
         "computer_use",
         "phone_use",
         "tiktok",
+        "phone_use_custom",
         "tv",
         "location",
     ]

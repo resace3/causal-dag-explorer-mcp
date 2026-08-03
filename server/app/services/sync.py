@@ -24,6 +24,11 @@ from ..connectors.activitywatch.connector import (
     ActivityWatchConnector,
 )
 from ..connectors.base import ConnectorResult
+from ..connectors.phone_usage.connector import (
+    SOURCE_ID as PU_SOURCE_ID,
+    SOURCE_NAME as PU_SOURCE_NAME,
+    PhoneUsageConnector,
+)
 from ..connectors.home_assistant.connector import (
     SOURCE_ID as HA_SOURCE_ID,
     SOURCE_NAME as HA_SOURCE_NAME,
@@ -67,6 +72,11 @@ SOURCE_CATALOGUE = {
         "wearable_route": None,
         "home_lanes": False,
     },
+    PU_SOURCE_ID: {
+        "name": PU_SOURCE_NAME,
+        "wearable_route": None,
+        "home_lanes": False,
+    },
 }
 
 
@@ -79,6 +89,7 @@ SOURCE_ROW_OWNER = {
     "wearable_home_assistant": HA_SOURCE_ID,
     "garmin": "garmin",
     AW_SOURCE_ID: AW_SOURCE_ID,
+    PU_SOURCE_ID: PU_SOURCE_ID,
 }
 
 
@@ -192,6 +203,18 @@ class SyncService:
                     "provides": ["Computer use: time at this machine, and in what"],
                 }
             )
+        if self.config.phone_usage.enabled:
+            items.append(
+                {
+                    "id": PU_SOURCE_ID,
+                    "name": PU_SOURCE_NAME,
+                    "mcpServer": None,
+                    "transport": "rest",
+                    "provides": [
+                        "Phone use: foreground segments, and per-app daily totals"
+                    ],
+                }
+            )
         return items
 
     def default_selection(self) -> list[str]:
@@ -297,22 +320,36 @@ class SyncService:
     def activitywatch_selected(self) -> bool:
         return AW_SOURCE_ID in self.source_selection()
 
+    def phone_usage_selected(self) -> bool:
+        return PU_SOURCE_ID in self.source_selection()
+
     def _connectors(
         self,
-    ) -> tuple[HomeAssistantConnector, WearableConnector, ActivityWatchConnector]:
+    ) -> tuple[
+        HomeAssistantConnector,
+        WearableConnector,
+        ActivityWatchConnector,
+        PhoneUsageConnector,
+    ]:
         home_assistant = HomeAssistantConnector(
             self.config.home_assistant, self.settings, self.tz
         )
         activitywatch = ActivityWatchConnector(
             self.config.activitywatch, self.settings, self.tz
         )
-        return home_assistant, WearableConnector(self._wearable_provider()), activitywatch
+        phone_usage = PhoneUsageConnector(self.config.phone_usage, self.settings, self.tz)
+        return (
+            home_assistant,
+            WearableConnector(self._wearable_provider()),
+            activitywatch,
+            phone_usage,
+        )
 
     # -- status ----------------------------------------------------------
 
     async def data_sources(self) -> DataSourceReport:
         """Report one row per MCP integration the timeline reads from."""
-        home_assistant, wearable, activitywatch = self._connectors()
+        home_assistant, wearable, activitywatch, phone_usage = self._connectors()
         selection = self.source_selection()
         if HA_SOURCE_ID in selection:
             ha_status, ha_detail = await home_assistant.check_status()
@@ -364,6 +401,26 @@ class SyncService:
                     last_sync=last_sync,
                     entity_count=len(aw_capabilities),
                     has_data=_lane_has_data(cached, ("computer_use",)),
+                )
+            )
+
+        if self.config.phone_usage.enabled:
+            if PU_SOURCE_ID in selection:
+                pu_status, pu_detail = await phone_usage.check_status()
+            else:
+                pu_status, pu_detail = "disconnected", "Switched off in the MCPs panel."
+            sources.append(
+                DataSource(
+                    id=PU_SOURCE_ID,
+                    name=PU_SOURCE_NAME,
+                    status=pu_status,
+                    mcp_server=None,
+                    transport="mock" if self.settings.use_mock_data else "rest",
+                    capabilities=["phone_foreground", "phone_app_totals"],
+                    detail=pu_detail,
+                    last_sync=last_sync,
+                    entity_count=1,
+                    has_data=_lane_has_data(cached, ("phone_use_custom",)),
                 )
             )
 
@@ -471,7 +528,7 @@ class SyncService:
     async def warm_up(self) -> None:
         """Probe the wearable route once at startup so the first page is fast."""
         try:
-            _home_assistant, wearable, _activitywatch = self._connectors()
+            _home_assistant, wearable, _activitywatch, _phone_usage = self._connectors()
             await self._cached_capabilities(wearable.provider)
         except Exception as exc:  # noqa: BLE001 - warm-up is best effort
             logger.info("Wearable capability warm-up did not complete: %s", exc)
@@ -505,7 +562,7 @@ class SyncService:
         fetch_start = window.start - LOOKBACK
         fetch_end = window.end + LOOKAHEAD
 
-        home_assistant, wearable, activitywatch = self._connectors()
+        home_assistant, wearable, activitywatch, phone_usage = self._connectors()
 
         # Switching a source off means it is not contacted at all. That is the
         # whole point of the switch, so the day is reconstructed from the rest
@@ -534,19 +591,47 @@ class SyncService:
                 )
             return await activitywatch.fetch(fetch_start, fetch_end)
 
-        ha_result, wearable_payload, aw_result = await asyncio.gather(
+        async def read_phone_usage() -> ConnectorResult:
+            if not self.config.phone_usage.enabled:
+                return ConnectorResult(
+                    status="disconnected",
+                    detail="The phone-usage add-on is disabled in config.yaml.",
+                )
+            if not self.phone_usage_selected():
+                return ConnectorResult(
+                    status="disconnected",
+                    detail="Switched off in the MCPs panel.",
+                    warnings=[
+                        "The phone-usage add-on is switched off, so its row is empty."
+                    ],
+                )
+            return await phone_usage.fetch(fetch_start, fetch_end)
+
+        ha_result, wearable_payload, aw_result, pu_result = await asyncio.gather(
             read_home_assistant(),
             wearable.fetch(fetch_start, fetch_end),
             read_activitywatch(),
+            read_phone_usage(),
         )
 
         warnings = (
-            list(ha_result.warnings) + list(wearable_payload.warnings) + list(aw_result.warnings)
+            list(ha_result.warnings)
+            + list(wearable_payload.warnings)
+            + list(aw_result.warnings)
+            + list(pu_result.warnings)
         )
-        errors = list(ha_result.errors) + list(wearable_payload.errors) + list(aw_result.errors)
+        errors = (
+            list(ha_result.errors)
+            + list(wearable_payload.errors)
+            + list(aw_result.errors)
+            + list(pu_result.errors)
+        )
 
         raw_records: list[RawRecord] = (
-            list(ha_result.records) + list(wearable_payload.raw_records) + list(aw_result.records)
+            list(ha_result.records)
+            + list(wearable_payload.raw_records)
+            + list(aw_result.records)
+            + list(pu_result.records)
         )
         normalized = normalize(raw_records, fetch_start, fetch_end)
         warnings.extend(normalized.warnings)

@@ -24,6 +24,7 @@ const VARIABLES = [
   'skin_temperature',
   'device_use',
   'tiktok',
+  'phone_pickups',
   'tv_use',
   'computer_use',
   'time_away',

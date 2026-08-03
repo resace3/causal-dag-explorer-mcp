@@ -170,6 +170,16 @@ VARIABLES: dict[str, Variable] = {
             unit="min",
         ),
         Variable(
+            "phone_pickups",
+            "Phone pickups",
+            "Times the phone was picked up and used, from Android's own "
+            "usage-stats stream. The same behaviour device_use describes, "
+            "measured by a second instrument at finer resolution — so the two "
+            "are alternatives, and conditioning on both counts one phone twice.",
+            lane="phone_use_custom",
+            unit="min",
+        ),
+        Variable(
             "tv_use",
             "TV use",
             "Stretches with the television on. Powered on rather than watched: "

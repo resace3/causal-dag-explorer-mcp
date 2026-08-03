@@ -221,6 +221,30 @@ class ActivityWatchConfig(StrictModel):
     """
 
 
+class PhoneUsageConfig(StrictModel):
+    """The Phone Usage Collector add-on, running on the Home Assistant host.
+
+    A second, better-resolved view of the same phone the companion app reports.
+    The companion app's sensors say which app was in front *now* and whether the
+    screen is on; this add-on holds Android's own usage-stats event stream, so
+    it has real foreground segments with start and end times, plus the counts
+    that only the system knows — unlocks, glances that never became an unlock,
+    notification interruptions, app switches.
+
+    Its address and token live in `.env`, not here: the token is a credential,
+    and this file is the one that gets shared.
+    """
+
+    enabled: bool = True
+
+    device_id: str | None = None
+    """Which collector to read when more than one phone reports.
+
+    Left unset, every device's segments are drawn together, which for two phones
+    would interleave two people's evenings into one row.
+    """
+
+
 class JsonFileProviderConfig(StrictModel):
     path: str = "./data/wearable.json"
 
@@ -538,6 +562,38 @@ class TvRule(StrictModel):
     is what an ad break or a few seconds of buffering looks like."""
 
 
+class PhoneUseCustomRule(StrictModel):
+    """The Phone Use custom row, from the usage-stats add-on.
+
+    Android emits a foreground event every time the front app changes, so a
+    normal evening is hundreds of segments. These decide what counts as one
+    pickup and what counts as a spell worth naming.
+
+    No clipping threshold appears here, and that is the difference from the
+    companion-app row: these segments have real end times, so there is nothing
+    to cut them against. The other row needs a screen sensor because its source
+    reports the last app indefinitely; this one does not.
+    """
+
+    rule_version: str = "1.0.0"
+
+    min_session_minutes: float = 0.5
+    """Shortest pickup worth drawing. Lower than the computer's, because
+    picking a phone up for forty seconds is a real and frequent event."""
+
+    merge_within_minutes: float = 3.0
+    """Segments separated by less than this are one pickup. Below it the phone
+    was still in hand between two apps."""
+
+    min_app_minutes: float = 1.0
+    """Shortest spell in one application worth naming. The time is still inside
+    the pickup above it, so nothing is lost — only the caption."""
+
+    app_merge_within_minutes: float = 1.0
+    """Runs of the same application separated by less than this are one spell:
+    a glance at the launcher and straight back is not two visits."""
+
+
 class ComputerUseRule(StrictModel):
     """Turns per-second focus events into readable sessions.
 
@@ -589,6 +645,7 @@ class FeatureEngineeringConfig(StrictModel):
     phone_app: PhoneAppRule = Field(default_factory=PhoneAppRule)
     tiktok: TrackedAppRule = Field(default_factory=TrackedAppRule)
     tv: TvRule = Field(default_factory=TvRule)
+    phone_use_custom: PhoneUseCustomRule = Field(default_factory=PhoneUseCustomRule)
     computer_use: ComputerUseRule = Field(default_factory=ComputerUseRule)
     data_gap: DataGapRule = Field(default_factory=DataGapRule)
 
@@ -605,6 +662,7 @@ class AppConfig(StrictModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     home_assistant: HomeAssistantConfig = Field(default_factory=HomeAssistantConfig)
     activitywatch: ActivityWatchConfig = Field(default_factory=ActivityWatchConfig)
+    phone_usage: PhoneUsageConfig = Field(default_factory=PhoneUsageConfig)
     wearable: WearableConfig = Field(default_factory=WearableConfig)
     feature_engineering: FeatureEngineeringConfig = Field(
         default_factory=FeatureEngineeringConfig

@@ -9,6 +9,7 @@ import { EnvironmentLane } from './EnvironmentLane';
 import { EventLane } from './EventLane';
 import { LocationLane } from './LocationLane';
 import { PhoneUseLane } from './PhoneUseLane';
+import { PhoneUseCustomLane } from './PhoneUseCustomLane';
 import { PresenceLane } from './PresenceLane';
 import { NowLine } from '../timeline/Axis';
 import { TvLane } from './TvLane';
@@ -23,6 +24,10 @@ function renderer(lane: Lane): (props: LaneRenderProps) => JSX.Element {
   if (lane.id === 'computer_use') return ComputerUseLane;
   // The same idea with two tiers: screen on, and which app was in front.
   if (lane.id === 'phone_use') return PhoneUseLane;
+  // The same two tiers, from the usage-stats add-on rather than the
+  // companion app. Same encoding on purpose: the rows are meant to be read
+  // against each other, and two different shapes would obstruct that.
+  if (lane.id === 'phone_use_custom') return PhoneUseCustomLane;
   // And again for the third screen: set on, and what was playing.
   if (lane.id === 'tv') return TvLane;
   // Activity keeps named sessions in front of a step-rate context line.

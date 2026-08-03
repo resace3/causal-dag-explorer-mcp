@@ -20,6 +20,7 @@ export const ACCENTS: Record<AccentToken, AccentTheme> = {
   blue: { stroke: '#2563eb', fill: '#3b82f6', soft: '#dbeafe', band: '#f6f9ff', text: '#1d4ed8' },
   indigo: { stroke: '#4f46e5', fill: '#6366f1', soft: '#e0e7ff', band: '#f8f8ff', text: '#4338ca' },
   purple: { stroke: '#7c3aed', fill: '#8b5cf6', soft: '#ede9fe', band: '#fbf9ff', text: '#6d28d9' },
+  violet: { stroke: '#4338ca', fill: '#818cf8', soft: '#e0e7ff', band: '#f9faff', text: '#3730a3' },
   orange: { stroke: '#ea580c', fill: '#f97316', soft: '#ffedd5', band: '#fffaf5', text: '#c2410c' },
   teal: { stroke: '#0d9488', fill: '#14b8a6', soft: '#ccfbf1', band: '#f5fdfc', text: '#0f766e' },
   sky: { stroke: '#0284c7', fill: '#0ea5e9', soft: '#e0f2fe', band: '#f6fbff', text: '#0369a1' },
@@ -52,6 +53,7 @@ export const LANE_HEIGHTS: Record<string, number> = {
   computer_use: 104,
   phone_use: 92,
   tiktok: 84,
+  phone_use_custom: 92,
   tv: 92,
   location: 96,
 };

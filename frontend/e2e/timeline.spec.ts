@@ -344,12 +344,19 @@ test.describe('Yesterday timeline', () => {
     test.skip(!pair, 'This day drew fewer than two unconnected variables.');
     const [source, target] = pair!;
 
+    // `hover()` rather than moving to a computed box: it runs Playwright's
+    // actionability checks, so it waits for the handle to stop moving and
+    // verifies the pointer actually lands on *it* rather than on something
+    // overlapping it. A busy day draws several handles per variable, and the
+    // first visible one can sit under a neighbouring node — in which case the
+    // press goes to the wrong element, no drag begins, and the failure shows up
+    // much later as "no drop target", which is not where the problem is.
     const handle = page.getByTestId(`dag-handle-${source}`).locator('visible=true').first();
     await handle.scrollIntoViewIfNeeded();
+    await handle.hover();
     const from = await handle.boundingBox();
     expect(from).not.toBeNull();
 
-    await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
     await page.mouse.down();
     await page.mouse.move(from!.x + 150, from!.y + 40, { steps: 10 });
 

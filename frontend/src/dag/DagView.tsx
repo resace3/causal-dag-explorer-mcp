@@ -623,12 +623,29 @@ export function DagView({ date, lanes }: { date: string | null; lanes: DagLaneSt
                       selected={selected?.id === node.occurrence.id}
                       showCaption={captionVisible.has(node.occurrence.id)}
                       plotWidth={plotWidth}
-                      connecting={connect?.from === node.occurrence.variable}
-                      onStartConnect={startConnect}
                       onSelect={(occurrence) =>
                         setSelected((current) =>
                           current?.id === occurrence.id ? null : occurrence,
                         )
+                      }
+                    />
+                  ))}
+
+                  {/* Handles last, so they sit above every node's hit area.
+                      A node's invisible target reaches NODE_RADIUS + 4 to its
+                      left, which on a busy row lands on top of the *previous*
+                      node's handle — and a buried handle does not fail loudly,
+                      it just selects the neighbour instead of starting a drag.
+                      Drawn in their own layer, the handles always win. */}
+                  {geometry.nodes.map((node) => (
+                    <ConnectHandle
+                      key={`handle-${node.occurrence.id}`}
+                      x={handleX(node)}
+                      y={node.y}
+                      active={connect?.from === node.occurrence.variable}
+                      testId={`dag-handle-${node.occurrence.variable}`}
+                      onStart={(hx, hy) =>
+                        startConnect(node.occurrence.variable, hx, hy)
                       }
                     />
                   ))}
@@ -852,8 +869,6 @@ function Node({
   selected,
   showCaption,
   plotWidth,
-  connecting,
-  onStartConnect,
   onSelect,
 }: {
   node: PlacedNode;
@@ -862,8 +877,6 @@ function Node({
   selected: boolean;
   showCaption: boolean;
   plotWidth: number;
-  connecting: boolean;
-  onStartConnect: (variable: string, x: number, y: number) => void;
   onSelect: (occurrence: DagOccurrence) => void;
 }) {
   const { occurrence, x, xEnd, y } = node;
@@ -1017,17 +1030,13 @@ function Node({
         fill="transparent"
       />
 
-      {(
-        <ConnectHandle
-          x={Math.max(x, xEnd) + NODE_RADIUS + 3}
-          y={y}
-          active={connecting}
-          testId={`dag-handle-${occurrence.variable}`}
-          onStart={(hx, hy) => onStartConnect(occurrence.variable, hx, hy)}
-        />
-      )}
     </g>
   );
+}
+
+/** Where a node's connect handle sits: just off its trailing edge. */
+export function handleX(node: PlacedNode): number {
+  return Math.max(node.x, node.xEnd) + NODE_RADIUS + 3;
 }
 
 /**

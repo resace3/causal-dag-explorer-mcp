@@ -141,6 +141,20 @@ activitywatch:
   # computers' focus histories are never merged into one day.
   # hostname: my-laptop
 
+# The Phone Usage Collector add-on, running on the Home Assistant host. It holds
+# Android's own usage-stats stream — real foreground segments with start and end
+# times, plus unlocks, glances and app switches the companion app cannot see.
+#
+# Its address and token are credentials, so they live in .env as PHONE_USAGE_URL
+# and PHONE_USAGE_TOKEN, not here. The URL is the add-on's host and port 8099,
+# e.g. http://192.168.1.10:8099 — port 8098 is the same API behind Home
+# Assistant Ingress, which needs a session cookie a long-lived token cannot mint.
+phone_usage:
+  enabled: true
+  # Set when more than one phone reports, or two people's evenings interleave
+  # into one row.
+  # device_id: 00000000-0000-0000-0000-000000000000
+
 wearable:
   # mock            - deterministic synthetic data, no credentials required
   # json_file       - read an export written by your own tooling
@@ -305,6 +319,16 @@ feature_engineering:
     min_programme_minutes: 4
     programme_merge_within_minutes: 3
 
+  # The Phone Use custom row. Segments here have real end times, so unlike the
+  # companion-app row there is nothing to clip them against — no screen sensor
+  # is required and none is consulted.
+  phone_use_custom:
+    rule_version: "1.0.0"
+    min_session_minutes: 0.5
+    merge_within_minutes: 3
+    min_app_minutes: 1
+    app_merge_within_minutes: 1
+
   # ActivityWatch writes an event every time the focused window changes, so a
   # working hour is hundreds of events. These decide what counts as one stretch
   # at the machine, and what counts as one spell in an application. Time below
@@ -357,6 +381,8 @@ lanes:
   - id: phone_use
     visible: true
   - id: tiktok
+    visible: true
+  - id: phone_use_custom
     visible: true
   - id: tv
     visible: true

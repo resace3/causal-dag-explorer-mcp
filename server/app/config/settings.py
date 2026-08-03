@@ -40,6 +40,17 @@ class Settings(BaseSettings):
         default=20.0, alias="ACTIVITYWATCH_TIMEOUT_SECONDS"
     )
 
+    # --- Phone usage add-on ---------------------------------------------
+    # The add-on serves its query API on two ports. 8099 takes a bearer token
+    # and is what this uses; 8098 goes through Home Assistant Ingress, which
+    # authenticates with a session cookie minted from an admin credential — a
+    # long-lived token cannot mint one, Supervisor endpoints refuse it.
+    phone_usage_url: str | None = Field(default=None, alias="PHONE_USAGE_URL")
+    phone_usage_token: str | None = Field(default=None, alias="PHONE_USAGE_TOKEN")
+    phone_usage_timeout_seconds: float = Field(
+        default=20.0, alias="PHONE_USAGE_TIMEOUT_SECONDS"
+    )
+
     # --- Locale ---------------------------------------------------------
     local_timezone: str = Field(default="America/New_York", alias="LOCAL_TIMEZONE")
 

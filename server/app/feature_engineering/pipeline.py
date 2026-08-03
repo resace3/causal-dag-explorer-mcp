@@ -21,6 +21,7 @@ from .rules import (
     light,
     location,
     phone_use,
+    phone_use_custom,
     presence,
     readiness,
     sleep,
@@ -46,6 +47,9 @@ RULES = (
     # it is a subset of, so the whole and the part read as one block.
     ("phone_use", phone_use.build_lane),
     ("tiktok", tiktok.build_lane),
+    # The same phone through a second instrument, kept next to the first so
+    # the two are read against each other rather than one at a time.
+    ("phone_use_custom", phone_use_custom.build_lane),
     # The third screen, kept with the other two. It is last of the three
     # because it is the one the day is least often spent in front of.
     ("tv", tv.build_lane),
@@ -64,6 +68,11 @@ FALLBACK_LANE_META = {
     "computer_use": ("Computer Use", "Time at this machine, and in what", "amber"),
     "phone_use": ("Phone Use", "Screen-on stretches, and what was open", "fuchsia"),
     "tiktok": ("TikTok", "Spells in the app, on the phone", "rose"),
+    "phone_use_custom": (
+        "Phone Use custom",
+        "Foreground segments from Android's usage stats",
+        "violet",
+    ),
     "tv": ("TV", "When the TV was on, and what was playing", "purple"),
     "location": ("Phone Location", "Zone and place name", "indigo"),
 }
